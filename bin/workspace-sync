@@ -4,8 +4,10 @@
 # On conflict, alerts via macOS notification + terminal motd.
 #
 # Usage:
-#   workspace-sync           # run once
-#   workspace-sync --status  # show current sync state
+#   workspace-sync              # run once
+#   workspace-sync --status     # show current sync state
+#   workspace-sync --install    # install as background service
+#   workspace-sync --uninstall  # remove background service
 
 set -euo pipefail
 
@@ -45,23 +47,83 @@ clear_conflict() {
 
 # ── Status mode ───────────────────────────────────────────────────────────────
 
-if [[ "${1:-}" == "--status" ]]; then
-  echo "Repo:     $REPO_DIR"
-  echo "Log:      $LOG_FILE"
-  if [[ -f "$ALERT_FILE" ]]; then
-    echo "Status:   CONFLICT"
-    echo ""
-    cat "$ALERT_FILE"
-  else
-    echo "Status:   OK"
-  fi
-  if [[ -f "$LOG_FILE" ]]; then
-    echo ""
-    echo "Recent log:"
-    tail -5 "$LOG_FILE"
-  fi
-  exit 0
-fi
+case "${1:-}" in
+  --status)
+    echo "Repo:     $REPO_DIR"
+    echo "Log:      $LOG_FILE"
+    if [[ -f "$ALERT_FILE" ]]; then
+      echo "Status:   CONFLICT"
+      echo ""
+      cat "$ALERT_FILE"
+    else
+      echo "Status:   OK"
+    fi
+    if [[ "$(uname)" == "Darwin" ]]; then
+      if launchctl print "gui/$(id -u)/com.workspace-sync" &>/dev/null; then
+        echo "Service:  running (launchd)"
+      else
+        echo "Service:  not installed"
+      fi
+    else
+      if systemctl --user is-active workspace-sync.timer &>/dev/null; then
+        echo "Service:  running (systemd)"
+      else
+        echo "Service:  not installed"
+      fi
+    fi
+    if [[ -f "$LOG_FILE" ]]; then
+      echo ""
+      echo "Recent log:"
+      tail -5 "$LOG_FILE"
+    fi
+    exit 0
+    ;;
+
+  --install)
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if [[ "$(uname)" == "Darwin" ]]; then
+      launchctl bootout "gui/$(id -u)/com.workspace-sync" 2>/dev/null || true
+      sed "s|\$HOME|$HOME|g" "$SCRIPT_DIR/com.workspace-sync.plist" \
+        > "$HOME/Library/LaunchAgents/com.workspace-sync.plist"
+      launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.workspace-sync.plist"
+      echo "✓ Installed launchd service (syncs every 15 min)"
+    else
+      mkdir -p "$HOME/.config/systemd/user"
+      cp "$SCRIPT_DIR/workspace-sync.service" "$HOME/.config/systemd/user/"
+      cp "$SCRIPT_DIR/workspace-sync.timer" "$HOME/.config/systemd/user/"
+      systemctl --user daemon-reload
+      systemctl --user enable --now workspace-sync.timer
+      echo "✓ Installed systemd timer (syncs every 15 min)"
+    fi
+    echo "  Check status: workspace-sync --status"
+    echo "  View log:     tail ~/.workspace-sync.log"
+    exit 0
+    ;;
+
+  --uninstall)
+    if [[ "$(uname)" == "Darwin" ]]; then
+      launchctl bootout "gui/$(id -u)/com.workspace-sync" 2>/dev/null || true
+      rm -f "$HOME/Library/LaunchAgents/com.workspace-sync.plist"
+      echo "✓ Removed launchd service"
+    else
+      systemctl --user disable --now workspace-sync.timer 2>/dev/null || true
+      rm -f "$HOME/.config/systemd/user/workspace-sync.service"
+      rm -f "$HOME/.config/systemd/user/workspace-sync.timer"
+      systemctl --user daemon-reload
+      echo "✓ Removed systemd timer"
+    fi
+    exit 0
+    ;;
+
+  --help|-h)
+    echo "Usage: workspace-sync [--install|--uninstall|--status|--help]"
+    echo "  (no args)     Run sync once"
+    echo "  --install     Install as background service (every 15 min)"
+    echo "  --uninstall   Remove background service"
+    echo "  --status      Show sync state and service status"
+    exit 0
+    ;;
+esac
 
 # ── Preflight ─────────────────────────────────────────────────────────────────
 
