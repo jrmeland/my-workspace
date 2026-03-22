@@ -1,0 +1,18 @@
+# Example tmuxinator project - customize and copy for your own projects
+# Usage: tmuxinator start example
+name: example
+root: ~/
+
+windows:
+  - editor:
+      layout: main-vertical
+      panes:
+        - nvim
+        - # empty shell
+  - logs:
+      panes:
+        - # tail logs or whatever you need
+  - ssh:
+      panes:
+        - ssh macmini
+        - ssh shire

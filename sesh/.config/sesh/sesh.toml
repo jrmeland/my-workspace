@@ -1,0 +1,7 @@
+[[session]]
+name = "macmini"
+startup_command = "mosh macmini -- tmux new-session -A -s main"
+
+[[session]]
+name = "shire"
+startup_command = "mosh shire -- tmux new-session -A -s main"

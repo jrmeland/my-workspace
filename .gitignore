@@ -1,0 +1,44 @@
+# Secrets - never commit
+.secrets
+*.secret
+*.local.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+*.swp
+*.swo
+*~
+
+# Claude Code transient state
+claude/.claude/history.jsonl
+claude/.claude/cache/
+claude/.claude/debug/
+claude/.claude/file-history/
+claude/.claude/ide/
+claude/.claude/sessions/
+claude/.claude/session-env/
+claude/.claude/shell-snapshots/
+claude/.claude/paste-cache/
+claude/.claude/plans/
+claude/.claude/tasks/
+claude/.claude/todos/
+claude/.claude/backups/
+claude/.claude/statsig/
+claude/.claude/telemetry/
+claude/.claude/stats-cache.json
+claude/.claude/policy-limits.json
+claude/.claude/mcp-needs-auth-cache.json
+claude/.claude/plugins/
+claude/.claude/teams/
+claude/.claude/downloads/
+
+# pi transient state
+pi/.pi/agent/sessions/
+pi/.pi/agent/auth.json
+pi/.pi/agent/cache/
+
+# Neovim transient
+nvim/.config/nvim/lazy-lock.json

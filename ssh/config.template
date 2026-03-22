@@ -1,0 +1,33 @@
+# SSH Config Template
+# Copy to ~/.ssh/config and fill in hostnames/IPs
+#
+# cp ~/source/my-workspace/ssh/config.template ~/.ssh/config
+# chmod 600 ~/.ssh/config
+
+# OrbStack (if installed)
+# Include ~/.orbstack/ssh/config
+
+Host tower
+     HostName tower.local
+     User root
+     Port 22
+
+Host coolify
+     HostName __COOLIFY_IP__
+     User josh
+
+Host brimbor
+     HostName __BRIMBOR_TAILSCALE_IP__
+     User josh
+
+Host macmini
+     HostName Joshs-Mac-mini.local
+     User joshmelander
+
+Host shire
+     HostName __SHIRE_TAILSCALE_IP__
+     User josh
+
+Host mithril
+     HostName __MITHRIL_TAILSCALE_IP__
+     User mithril

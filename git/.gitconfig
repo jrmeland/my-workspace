@@ -1,0 +1,45 @@
+# This is Git's per-user configuration file.
+[user]
+	email = joshmelander@gmail.com
+	name = Josh Melander
+[push]
+	autoSetupRemote = true
+[safe]
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *
+	directory = *

@@ -1,0 +1,71 @@
+{
+    "notebook.output.textLineLimit": 100,
+    "aws.telemetry": false,
+    "editor.formatOnSave": true,
+    "window.zoomLevel": -1,
+    "python.analysis.extraPaths": [
+        "/Users/josh/.local/share/virtualenvs/miai-QgsaDsHz/lib",
+        "/Users/josh/.vscode/extensions/continue.continue-0.8.1-darwin-arm64"
+    ],
+    "python.autoComplete.extraPaths": [
+        "/Users/josh/.local/share/virtualenvs/miai-QgsaDsHz/lib",
+        "/Users/josh/.vscode/extensions/continue.continue-0.8.1-darwin-arm64"
+    ],
+    "aws.suppressPrompts": {
+        "codeWhispererConnectionExpired": true
+    },
+    "svg.preview.mode": "svg",
+    "editor.accessibilitySupport": "off",
+    "cSpell.userWords": [
+        "agentic",
+        "Buildable",
+        "Edevly",
+        "Enclaiva",
+        "Instrumentor",
+        "Linfield",
+        "Melander",
+        "SDLC"
+    ],
+    "nix.formatterPath": "nixpkgs-fmt",
+    "nix.enableLanguageServer": true,
+    "[nix]": {
+        "editor.insertSpaces": true,
+        "editor.tabSize": 2
+    },
+    "git.confirmSync": false,
+    "github.copilot.editor.enableAutoCompletions": true,
+    "hediet.vscode-drawio.resizeImages": null,
+    "[html]": {
+        "editor.suggest.insertMode": "replace"
+    },
+    "workbench.colorTheme": "Quiet Light",
+    "cursorpyright.analysis.extraPaths": [
+        "/Users/josh/.local/share/virtualenvs/miai-QgsaDsHz/lib",
+        "/Users/josh/.vscode/extensions/continue.continue-0.8.1-darwin-arm64"
+    ],
+    "explorer.fileNesting.patterns": {
+        "*.ts": "${capture}.js",
+        "*.js": "${capture}.js.map, ${capture}.min.js, ${capture}.d.ts",
+        "*.jsx": "${capture}.js",
+        "*.tsx": "${capture}.ts",
+        "tsconfig.json": "tsconfig.*.json",
+        "package.json": "package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lockb, bun.lock",
+        "pubspec.yaml": "pubspec.lock,pubspec_overrides.yaml,.packages,.flutter-plugins,.flutter-plugins-dependencies,.metadata",
+        "*.dart": "${capture}.g.dart",
+        "flake.nix": "flake.lock",
+        "*.sqlite": "${capture}.${extname}-*",
+        "*.db": "${capture}.${extname}-*",
+        "*.sqlite3": "${capture}.${extname}-*",
+        "*.db3": "${capture}.${extname}-*",
+        "*.sdb": "${capture}.${extname}-*",
+        "*.s3db": "${capture}.${extname}-*"
+    },
+    "python.terminal.activateEnvInCurrentTerminal": true,
+    "python.pythonPath": "",
+    "svelte.enable-ts-plugin": true,
+    "[json]": {
+        "editor.defaultFormatter": "vscode.json-language-features"
+    },
+    "githubPullRequests.fileListLayout": "flat",
+    "githubPullRequests.terminalLinksHandler": "github"
+}
