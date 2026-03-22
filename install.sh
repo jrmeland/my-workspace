@@ -3,38 +3,105 @@
 # Works on macOS and Linux.
 #
 # Usage:
-#   git clone <your-repo> ~/source/my-workspace
-#   cd ~/source/my-workspace
-#   ./install.sh              # interactive (default)
-#   ./install.sh --yes        # auto-accept everything
-#   ./install.sh --dry-run    # show what would happen, change nothing
+#   ./install.sh                        # interactive (all sections)
+#   ./install.sh --yes                  # auto-accept all prompts
+#   ./install.sh --dry-run              # preview without changes
+#   ./install.sh stow nvm claude        # run only these sections
+#   ./install.sh --skip brew --skip cursor  # run all except these
+#   ./install.sh --list                 # show available sections
+#
+# Sections:
+#   preflight, brew, stow, omz, tpm, nvm, bun,
+#   claude, pi, cursor, ssh, secrets, macos, sync
 
 set -euo pipefail
 
 DOTFILES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OS="$(uname)"
 
+# ── All available sections (in order) ────────────────────────────────────────
+
+ALL_SECTIONS=(preflight brew stow omz tpm nvm bun claude pi cursor ssh secrets macos sync)
+
 # ── Flag parsing ──────────────────────────────────────────────────────────────
 
 DRY_RUN=false
 AUTO_YES=false
+ONLY_SECTIONS=()
+SKIP_SECTIONS=()
 
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run) DRY_RUN=true ;;
-    --yes)     AUTO_YES=true ;;
-    --help|-h)
-      echo "Usage: ./install.sh [--yes] [--dry-run]"
-      echo "  --yes       Auto-accept all prompts"
-      echo "  --dry-run   Show what would happen without making changes"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) DRY_RUN=true; shift ;;
+    --yes)     AUTO_YES=true; shift ;;
+    --skip)
+      [[ -z "${2:-}" ]] && { echo "Error: --skip requires a section name"; exit 1; }
+      SKIP_SECTIONS+=("$2"); shift 2
+      ;;
+    --list)
+      echo "Available sections:"
+      for s in "${ALL_SECTIONS[@]}"; do
+        printf "  %s\n" "$s"
+      done
       exit 0
       ;;
-    *)
-      echo "Unknown flag: $arg (try --help)"
+    --help|-h)
+      echo "Usage: ./install.sh [flags] [section ...]"
+      echo ""
+      echo "Flags:"
+      echo "  --yes                Auto-accept all prompts"
+      echo "  --dry-run            Show what would happen without making changes"
+      echo "  --skip <section>     Skip a section (can be repeated)"
+      echo "  --list               Show available sections"
+      echo ""
+      echo "Sections: ${ALL_SECTIONS[*]}"
+      echo ""
+      echo "Examples:"
+      echo "  ./install.sh                          # interactive, all sections"
+      echo "  ./install.sh stow nvm claude          # only these sections"
+      echo "  ./install.sh --yes --skip brew        # all except brew, auto-accept"
+      echo "  ./install.sh --yes --skip brew --skip cursor  # skip multiple"
+      exit 0
+      ;;
+    -*)
+      echo "Unknown flag: $1 (try --help)"
       exit 1
+      ;;
+    *)
+      ONLY_SECTIONS+=("$1"); shift
       ;;
   esac
 done
+
+# Validate section names
+for s in "${ONLY_SECTIONS[@]+"${ONLY_SECTIONS[@]}"}" "${SKIP_SECTIONS[@]+"${SKIP_SECTIONS[@]}"}"; do
+  found=false
+  for valid in "${ALL_SECTIONS[@]}"; do
+    [[ "$s" == "$valid" ]] && found=true
+  done
+  if ! $found; then
+    echo "Unknown section: $s"
+    echo "Available: ${ALL_SECTIONS[*]}"
+    exit 1
+  fi
+done
+
+# Should this section run?
+should_run() {
+  local section="$1"
+  # If --skip was used, skip it
+  for s in "${SKIP_SECTIONS[@]+"${SKIP_SECTIONS[@]}"}"; do
+    [[ "$s" == "$section" ]] && return 1
+  done
+  # If specific sections were requested, only run those
+  if [[ ${#ONLY_SECTIONS[@]} -gt 0 ]]; then
+    for s in "${ONLY_SECTIONS[@]}"; do
+      [[ "$s" == "$section" ]] && return 0
+    done
+    return 1
+  fi
+  return 0
+}
 
 # ── UI helpers ────────────────────────────────────────────────────────────────
 
@@ -287,70 +354,72 @@ echo ""
 
 # ── Pre-flight: scan for secrets in existing shell configs ────────────────────
 
-header "Pre-flight checks"
+if should_run preflight; then
+  header "Pre-flight checks"
 
-for rc_file in "$HOME/.zprofile" "$HOME/.zshenv" "$HOME/.bashrc" "$HOME/.bash_profile"; do
-  if [[ -f "$rc_file" ]]; then
-    migrate_secrets "$rc_file"
-  fi
-done
-ok "Pre-flight complete"
-
-# ── Homebrew ──────────────────────────────────────────────────────────────────
-
-header "Homebrew"
-
-if command -v brew &>/dev/null; then
-  ok "Already installed ($(brew --version | head -1))"
-else
-  if ask "Install Homebrew?"; then
-    if $DRY_RUN; then
-      dry "would install Homebrew"
-    else
-      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-      if [[ "$OS" == "Darwin" ]]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-      else
-        eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-      fi
-      ok "Homebrew installed"
+  for rc_file in "$HOME/.zprofile" "$HOME/.zshenv" "$HOME/.bashrc" "$HOME/.bash_profile"; do
+    if [[ -f "$rc_file" ]]; then
+      migrate_secrets "$rc_file"
     fi
-  else
-    skip "Homebrew"
-  fi
+  done
+  ok "Pre-flight complete"
 fi
 
-# ── Brewfile ──────────────────────────────────────────────────────────────────
+# ── Homebrew + Brewfile ───────────────────────────────────────────────────────
 
-header "Brew packages"
+if should_run brew; then
+  header "Homebrew"
 
-if command -v brew &>/dev/null; then
-  if ask "Install/update packages from Brewfile?"; then
-    if $DRY_RUN; then
-      # Show what would be installed
-      if brew bundle check --file="$DOTFILES_DIR/Brewfile" --verbose 2>/dev/null; then
-        ok "All packages already installed"
+  if command -v brew &>/dev/null; then
+    ok "Already installed ($(brew --version | head -1))"
+  else
+    if ask "Install Homebrew?"; then
+      if $DRY_RUN; then
+        dry "would install Homebrew"
       else
-        dry "would install/update packages from Brewfile"
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        if [[ "$OS" == "Darwin" ]]; then
+          eval "$(/opt/homebrew/bin/brew shellenv)"
+        else
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+        fi
+        ok "Homebrew installed"
       fi
     else
-      info "Running brew bundle (this may take a while)..."
-      if [[ "$OS" == "Linux" ]]; then
-        brew bundle --file="$DOTFILES_DIR/Brewfile" 2>&1 | grep -v "^Skipping" || true
+      skip "Homebrew"
+    fi
+  fi
+
+  header "Brew packages"
+
+  if command -v brew &>/dev/null; then
+    if ask "Install/update packages from Brewfile?"; then
+      if $DRY_RUN; then
+        if brew bundle check --file="$DOTFILES_DIR/Brewfile" --verbose 2>/dev/null; then
+          ok "All packages already installed"
+        else
+          dry "would install/update packages from Brewfile"
+        fi
       else
-        brew bundle --file="$DOTFILES_DIR/Brewfile"
+        info "Running brew bundle (this may take a while)..."
+        if [[ "$OS" == "Linux" ]]; then
+          brew bundle --file="$DOTFILES_DIR/Brewfile" 2>&1 | grep -v "^Skipping" || true
+        else
+          brew bundle --file="$DOTFILES_DIR/Brewfile"
+        fi
+        ok "Brew packages up to date"
       fi
-      ok "Brew packages up to date"
+    else
+      skip "Brew packages"
     fi
   else
-    skip "Brew packages"
+    skip "Brew packages (Homebrew not installed)"
   fi
-else
-  skip "Brew packages (Homebrew not installed)"
 fi
 
 # ── GNU Stow ─────────────────────────────────────────────────────────────────
 
+if should_run stow; then
 header "Stow configs"
 
 STOW_PACKAGES=(zsh git tmux ghostty sesh tmuxinator nvim claude pi)
@@ -395,9 +464,11 @@ else
     fi
   done
 fi
+fi # stow
 
 # ── Oh My Zsh ────────────────────────────────────────────────────────────────
 
+if should_run omz; then
 header "Oh My Zsh"
 
 if [[ -d "$HOME/.oh-my-zsh" ]]; then
@@ -414,9 +485,11 @@ else
     skip "Oh My Zsh"
   fi
 fi
+fi # omz
 
 # ── TPM ───────────────────────────────────────────────────────────────────────
 
+if should_run tpm; then
 header "Tmux Plugin Manager"
 
 if [[ -d "$HOME/.tmux/plugins/tpm" ]]; then
@@ -433,9 +506,11 @@ else
     skip "TPM"
   fi
 fi
+fi # tpm
 
 # ── nvm ───────────────────────────────────────────────────────────────────────
 
+if should_run nvm; then
 header "Node (nvm)"
 
 if [[ -d "$HOME/.nvm" ]]; then
@@ -489,9 +564,11 @@ if ! command -v npm &>/dev/null; then
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
   fi
 fi
+fi # nvm
 
 # ── bun ───────────────────────────────────────────────────────────────────────
 
+if should_run bun; then
 header "Bun"
 
 if command -v bun &>/dev/null; then
@@ -508,9 +585,11 @@ else
     skip "bun"
   fi
 fi
+fi # bun
 
 # ── Claude Code ───────────────────────────────────────────────────────────────
 
+if should_run claude; then
 header "Claude Code"
 
 if command -v claude &>/dev/null; then
@@ -527,9 +606,11 @@ else
     skip "Claude Code"
   fi
 fi
+fi # claude
 
 # ── pi ────────────────────────────────────────────────────────────────────────
 
+if should_run pi; then
 header "pi"
 
 if command -v pi &>/dev/null; then
@@ -547,9 +628,11 @@ else
     skip "pi"
   fi
 fi
+fi # pi
 
 # ── Cursor ────────────────────────────────────────────────────────────────────
 
+if should_run cursor; then
 header "Cursor"
 
 if [[ "$OS" == "Darwin" ]]; then
@@ -611,9 +694,11 @@ else
     printf "    ${DIM}cat cursor/extensions.txt | xargs -L1 cursor --install-extension${RESET}\n"
   fi
 fi
+fi # cursor
 
 # ── SSH config ────────────────────────────────────────────────────────────────
 
+if should_run ssh; then
 header "SSH config"
 
 if [[ -f "$HOME/.ssh/config" ]]; then
@@ -636,9 +721,11 @@ else
     skip "SSH config"
   fi
 fi
+fi # ssh
 
 # ── Secrets ───────────────────────────────────────────────────────────────────
 
+if should_run secrets; then
 header "Secrets"
 
 if [[ -f "$HOME/.secrets" ]]; then
@@ -662,10 +749,11 @@ else
     skip "~/.secrets"
   fi
 fi
+fi # secrets
 
 # ── macOS defaults ────────────────────────────────────────────────────────────
 
-if [[ "$OS" == "Darwin" ]]; then
+if should_run macos && [[ "$OS" == "Darwin" ]]; then
   header "macOS defaults"
 
   if ask "Apply macOS defaults? (Dock, Finder, Caps Lock → Ctrl, etc.)"; then
@@ -682,6 +770,7 @@ fi
 
 # ── workspace-sync service ────────────────────────────────────────────────────
 
+if should_run sync; then
 header "Auto-sync service"
 
 if ask "Install workspace-sync? (auto-commits and syncs every 15 min)"; then
@@ -714,6 +803,7 @@ if ask "Install workspace-sync? (auto-commits and syncs every 15 min)"; then
 else
   skip "workspace-sync service"
 fi
+fi # sync
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 
