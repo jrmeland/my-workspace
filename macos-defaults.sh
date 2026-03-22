@@ -70,8 +70,8 @@ echo "  ✓ Finder preferences"
 
 # ── Dock ──────────────────────────────────────────────────────────────────────
 
-# Auto-hide the Dock
-defaults write com.apple.dock autohide -bool true
+# Don't auto-hide the Dock
+defaults write com.apple.dock autohide -bool false
 
 # Remove auto-hide delay
 defaults write com.apple.dock autohide-delay -float 0
