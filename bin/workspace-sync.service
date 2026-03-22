@@ -1,0 +1,7 @@
+[Unit]
+Description=Sync my-workspace dotfiles repo
+
+[Service]
+Type=oneshot
+ExecStart=%h/source/my-workspace/bin/workspace-sync
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin:%h/.nvm/versions/node/default/bin

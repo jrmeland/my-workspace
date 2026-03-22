@@ -680,6 +680,41 @@ if [[ "$OS" == "Darwin" ]]; then
   fi
 fi
 
+# ── workspace-sync service ────────────────────────────────────────────────────
+
+header "Auto-sync service"
+
+if ask "Install workspace-sync? (auto-commits and syncs every 15 min)"; then
+  if $DRY_RUN; then
+    if [[ "$OS" == "Darwin" ]]; then
+      dry "would install launchd service com.workspace-sync"
+    else
+      dry "would install systemd timer workspace-sync.timer"
+    fi
+  else
+    if [[ "$OS" == "Darwin" ]]; then
+      # Unload first if already installed
+      launchctl bootout "gui/$(id -u)/com.workspace-sync" 2>/dev/null || true
+      # Expand $HOME in the plist and install
+      sed "s|\$HOME|$HOME|g" "$DOTFILES_DIR/bin/com.workspace-sync.plist" \
+        > "$HOME/Library/LaunchAgents/com.workspace-sync.plist"
+      launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.workspace-sync.plist"
+      ok "launchd service installed (runs every 15 min)"
+    else
+      mkdir -p "$HOME/.config/systemd/user"
+      cp "$DOTFILES_DIR/bin/workspace-sync.service" "$HOME/.config/systemd/user/"
+      cp "$DOTFILES_DIR/bin/workspace-sync.timer" "$HOME/.config/systemd/user/"
+      systemctl --user daemon-reload
+      systemctl --user enable --now workspace-sync.timer
+      ok "systemd timer installed (runs every 15 min)"
+    fi
+    info "Check status: workspace-sync --status"
+    info "View log: tail ~/.workspace-sync.log"
+  fi
+else
+  skip "workspace-sync service"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 echo ""

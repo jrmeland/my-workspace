@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# workspace-sync — auto-sync my-workspace repo.
+# Pulls with rebase, auto-commits local changes, pushes.
+# On conflict, alerts via macOS notification + terminal motd.
+#
+# Usage:
+#   workspace-sync           # run once
+#   workspace-sync --status  # show current sync state
+
+set -euo pipefail
+
+REPO_DIR="${WORKSPACE_SYNC_REPO:-$HOME/source/my-workspace}"
+ALERT_FILE="$HOME/.workspace-sync-conflict"
+LOG_FILE="$HOME/.workspace-sync.log"
+HOSTNAME="$(hostname -s)"
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"; }
+
+notify() {
+  local title="$1" msg="$2"
+  log "$title: $msg"
+
+  if [[ "$(uname)" == "Darwin" ]]; then
+    osascript -e "display notification \"$msg\" with title \"$title\"" 2>/dev/null || true
+  elif command -v notify-send &>/dev/null; then
+    notify-send "$title" "$msg" 2>/dev/null || true
+  fi
+}
+
+# Write conflict alert file — picked up by shell hook on next terminal open
+set_conflict() {
+  local msg="$1"
+  cat > "$ALERT_FILE" << EOF
+$msg
+Detected: $(date '+%Y-%m-%d %H:%M:%S')
+Repo: $REPO_DIR
+Run: cd $REPO_DIR && git status
+EOF
+  notify "workspace-sync: conflict" "$msg"
+}
+
+clear_conflict() {
+  rm -f "$ALERT_FILE"
+}
+
+# ── Status mode ───────────────────────────────────────────────────────────────
+
+if [[ "${1:-}" == "--status" ]]; then
+  echo "Repo:     $REPO_DIR"
+  echo "Log:      $LOG_FILE"
+  if [[ -f "$ALERT_FILE" ]]; then
+    echo "Status:   CONFLICT"
+    echo ""
+    cat "$ALERT_FILE"
+  else
+    echo "Status:   OK"
+  fi
+  if [[ -f "$LOG_FILE" ]]; then
+    echo ""
+    echo "Recent log:"
+    tail -5 "$LOG_FILE"
+  fi
+  exit 0
+fi
+
+# ── Preflight ─────────────────────────────────────────────────────────────────
+
+if [[ ! -d "$REPO_DIR/.git" ]]; then
+  log "ERROR: $REPO_DIR is not a git repo"
+  exit 1
+fi
+
+cd "$REPO_DIR"
+
+# Don't run if a rebase is already in progress
+if [[ -d .git/rebase-merge || -d .git/rebase-apply ]]; then
+  log "SKIP: rebase already in progress"
+  set_conflict "Rebase in progress — resolve manually"
+  exit 1
+fi
+
+# Need network access
+if ! git ls-remote --exit-code origin &>/dev/null 2>&1; then
+  log "SKIP: cannot reach remote"
+  exit 0
+fi
+
+# ── Auto-commit local changes ────────────────────────────────────────────────
+
+if [[ -n "$(git status --porcelain)" ]]; then
+  git add -A
+  git commit -m "auto-sync from $HOSTNAME ($(date '+%Y-%m-%d %H:%M'))" --no-gpg-sign 2>/dev/null
+  log "Committed local changes"
+fi
+
+# ── Pull with rebase ─────────────────────────────────────────────────────────
+
+pull_output="$(git pull --rebase origin main 2>&1)" || {
+  # Rebase failed — conflict
+  log "CONFLICT during pull: $pull_output"
+  git rebase --abort 2>/dev/null || true
+  set_conflict "Merge conflict during pull — run 'cd $REPO_DIR && git pull --rebase' to resolve"
+  exit 1
+}
+
+log "Pull OK: $(echo "$pull_output" | tail -1)"
+
+# Clear any previous conflict alert on successful pull
+clear_conflict
+
+# ── Push ──────────────────────────────────────────────────────────────────────
+
+if git status -sb | grep -q "ahead"; then
+  push_output="$(git push origin main 2>&1)" || {
+    log "PUSH FAILED: $push_output"
+    notify "workspace-sync" "Push failed — check $LOG_FILE"
+    exit 1
+  }
+  log "Pushed to origin"
+fi
+
+log "Sync complete"

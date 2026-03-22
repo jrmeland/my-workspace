@@ -175,3 +175,14 @@ rtmux() {
 
 # Zoxide - smarter cd
 eval "$(zoxide init zsh)"
+
+# workspace-sync conflict alert
+if [[ -f "$HOME/.workspace-sync-conflict" ]]; then
+  printf '\033[1;31m'
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "  ⚠  workspace-sync conflict detected"
+  echo ""
+  cat "$HOME/.workspace-sync-conflict"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  printf '\033[0m'
+fi
