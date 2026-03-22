@@ -1,0 +1,16 @@
+# Usage: tmuxinator start project -n my-feature
+#   -n sets the session name (defaults to "project")
+#   Run from inside your repo directory
+name: project
+root: .
+
+windows:
+  - workspace:
+      layout: main-vertical
+      panes:
+        - # left half
+        - # top right
+        - # bottom right
+  - agent:
+      panes:
+        - claude
