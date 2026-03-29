@@ -1,0 +1,32 @@
+# .local.conf — Per-machine overrides for install.sh
+# Copy to .local.conf and uncomment what you need.
+# This file is gitignored and will not sync across machines.
+#
+# Rules:
+#   - skip_* arrays exclude specific items
+#   - only_* arrays include ONLY the listed items (allowlist mode)
+#   - When both are set for the same category, only_* wins
+#   - CLI --skip flags merge additively with skip_sections
+
+# ── Sections ────────────────────────────────────────────────────────────────
+# Available: preflight brew stow omz tpm nvm bun claude pi cursor ssh secrets macos sync
+#skip_sections=(cursor macos)
+
+# ── Brew formulae ───────────────────────────────────────────────────────────
+#skip_brew=(ffmpeg portaudio go)
+#only_brew=(stow fzf gh git ripgrep tmux neovim)
+
+# ── Brew casks ──────────────────────────────────────────────────────────────
+#skip_casks=(rectangle)
+#only_casks=(ghostty)
+
+# ── Brew taps ───────────────────────────────────────────────────────────────
+#skip_taps=(withgraphite/tap)
+
+# ── Stow packages ──────────────────────────────────────────────────────────
+#skip_stow=(pi claude)
+#only_stow=(zsh git tmux ghostty nvim)
+
+# ── Cursor extensions ──────────────────────────────────────────────────────
+#skip_cursor_extensions=(dart-code.dart-code dart-code.flutter ms-vscode-remote.remote-wsl)
+#only_cursor_extensions=(anthropic.claude-code eamodio.gitlens esbenp.prettier-vscode)
