@@ -17,6 +17,15 @@
 set -euo pipefail
 
 DOTFILES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Temp file cleanup
+TMPFILES=()
+cleanup() {
+  for f in "${TMPFILES[@]+"${TMPFILES[@]}"}"; do
+    rm -f "$f"
+  done
+}
+trap cleanup EXIT
 OS="$(uname)"
 
 # ── All available sections (in order) ────────────────────────────────────────
@@ -61,6 +70,8 @@ while [[ $# -gt 0 ]]; do
       echo "  ./install.sh stow nvm claude          # only these sections"
       echo "  ./install.sh --yes --skip brew        # all except brew, auto-accept"
       echo "  ./install.sh --yes --skip brew --skip cursor  # skip multiple"
+      echo ""
+      echo "Per-machine config: copy .local.conf.example to .local.conf"
       exit 0
       ;;
     -*)
@@ -86,6 +97,32 @@ for s in "${ONLY_SECTIONS[@]+"${ONLY_SECTIONS[@]}"}" "${SKIP_SECTIONS[@]+"${SKIP
   fi
 done
 
+# ── Per-machine config (.local.conf) ─────────────────────────────────────────
+
+# Initialize filter arrays (overridden by .local.conf if present)
+skip_sections=()
+skip_brew=()
+only_brew=()
+skip_casks=()
+only_casks=()
+skip_taps=()
+only_taps=()
+skip_stow=()
+only_stow=()
+skip_cursor_extensions=()
+only_cursor_extensions=()
+
+LOCAL_CONF="$DOTFILES_DIR/.local.conf"
+if [[ -f "$LOCAL_CONF" ]]; then
+  # shellcheck source=/dev/null
+  source "$LOCAL_CONF"
+
+  # Merge config skip_sections with CLI --skip flags
+  for s in "${skip_sections[@]+"${skip_sections[@]}"}"; do
+    SKIP_SECTIONS+=("$s")
+  done
+fi
+
 # Should this section run?
 should_run() {
   local section="$1"
@@ -101,6 +138,71 @@ should_run() {
     return 1
   fi
   return 0
+}
+
+# ── Item filter helpers ──────────────────────────────────────────────────────
+
+# Check if an item is in a list
+_in_list() {
+  local item="$1"; shift
+  for i in "$@"; do
+    [[ "$i" == "$item" ]] && return 0
+  done
+  return 1
+}
+
+# Check if an item should be included based on skip_*/only_* arrays.
+# Usage: item_included <item> <category>
+# Categories: brew, casks, taps, stow, cursor_extensions
+item_included() {
+  local item="$1"
+  local category="$2"
+
+  local only_var="only_${category}[@]"
+  local skip_var="skip_${category}[@]"
+  local only_items=("${!only_var+"${!only_var}"}")
+  local skip_items=("${!skip_var+"${!skip_var}"}")
+
+  # only_* takes precedence: item must be in the list
+  if [[ ${#only_items[@]} -gt 0 ]]; then
+    _in_list "$item" "${only_items[@]}" && return 0
+    return 1
+  fi
+
+  # Otherwise check skip_* list
+  if [[ ${#skip_items[@]} -gt 0 ]]; then
+    _in_list "$item" "${skip_items[@]}" && return 1
+  fi
+
+  return 0
+}
+
+# Generate a filtered Brewfile, returns path to temp file.
+generate_filtered_brewfile() {
+  local src="$1"
+  local tmpfile
+  tmpfile="$(mktemp "${TMPDIR:-/tmp}/Brewfile.XXXXXX")"
+  TMPFILES+=("$tmpfile")
+
+  while IFS= read -r line; do
+    # Pass through empty lines and comments
+    if [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]]; then
+      echo "$line" >> "$tmpfile"
+      continue
+    fi
+
+    if [[ "$line" =~ ^tap[[:space:]]+\"([^\"]+)\" ]]; then
+      item_included "${BASH_REMATCH[1]}" "taps" && echo "$line" >> "$tmpfile"
+    elif [[ "$line" =~ ^brew[[:space:]]+\"([^\"]+)\" ]]; then
+      item_included "${BASH_REMATCH[1]}" "brew" && echo "$line" >> "$tmpfile"
+    elif [[ "$line" =~ ^cask[[:space:]]+\"([^\"]+)\" ]]; then
+      item_included "${BASH_REMATCH[1]}" "casks" && echo "$line" >> "$tmpfile"
+    else
+      echo "$line" >> "$tmpfile"
+    fi
+  done < "$src"
+
+  echo "$tmpfile"
 }
 
 # ── UI helpers ────────────────────────────────────────────────────────────────
@@ -350,6 +452,7 @@ printf "  ${DIM}Repo:   %s${RESET}\n" "$DOTFILES_DIR"
 printf "  ${DIM}Target: %s${RESET}\n" "$HOME"
 printf "  ${DIM}OS:     %s${RESET}\n" "$OS"
 $DRY_RUN && printf "  ${MAGENTA}${BOLD}Mode:   DRY RUN (no changes will be made)${RESET}\n"
+[[ -f "$LOCAL_CONF" ]] && printf "  ${DIM}Config: .local.conf loaded${RESET}\n"
 echo ""
 
 # ── Pre-flight: scan for secrets in existing shell configs ────────────────────
@@ -393,9 +496,18 @@ if should_run brew; then
   header "Brew packages"
 
   if command -v brew &>/dev/null; then
+    # Use filtered Brewfile when local config has brew overrides
+    brewfile="$DOTFILES_DIR/Brewfile"
+    if [[ ${#skip_brew[@]} -gt 0 || ${#only_brew[@]} -gt 0 || \
+          ${#skip_casks[@]} -gt 0 || ${#only_casks[@]} -gt 0 || \
+          ${#skip_taps[@]} -gt 0 || ${#only_taps[@]} -gt 0 ]]; then
+      brewfile="$(generate_filtered_brewfile "$DOTFILES_DIR/Brewfile")"
+      info "Using filtered Brewfile (per .local.conf)"
+    fi
+
     if ask "Install/update packages from Brewfile?"; then
       if $DRY_RUN; then
-        if brew bundle check --file="$DOTFILES_DIR/Brewfile" --verbose 2>/dev/null; then
+        if brew bundle check --file="$brewfile" --verbose 2>/dev/null; then
           ok "All packages already installed"
         else
           dry "would install/update packages from Brewfile"
@@ -403,9 +515,9 @@ if should_run brew; then
       else
         info "Running brew bundle (this may take a while)..."
         if [[ "$OS" == "Linux" ]]; then
-          brew bundle --file="$DOTFILES_DIR/Brewfile" 2>&1 | grep -v "^Skipping" || true
+          brew bundle --file="$brewfile" 2>&1 | grep -v "^Skipping" || true
         else
-          brew bundle --file="$DOTFILES_DIR/Brewfile"
+          brew bundle --file="$brewfile"
         fi
         ok "Brew packages up to date"
       fi
@@ -436,6 +548,11 @@ if ! command -v stow &>/dev/null; then
 else
   for pkg in "${STOW_PACKAGES[@]}"; do
     if [[ ! -d "$DOTFILES_DIR/$pkg" ]]; then
+      continue
+    fi
+
+    if ! item_included "$pkg" "stow"; then
+      skip "$pkg (excluded by .local.conf)"
       continue
     fi
 
@@ -673,16 +790,22 @@ fi
 
 # Extensions
 if command -v cursor &>/dev/null && [[ -f "$DOTFILES_DIR/cursor/extensions.txt" ]]; then
-  ext_count="$(wc -l < "$DOTFILES_DIR/cursor/extensions.txt" | tr -d ' ')"
-  if ask "Install Cursor extensions? ($ext_count extensions)"; then
+  # Build filtered extension list
+  filtered_exts=()
+  while IFS= read -r ext; do
+    [[ -z "$ext" ]] && continue
+    item_included "$ext" "cursor_extensions" && filtered_exts+=("$ext")
+  done < "$DOTFILES_DIR/cursor/extensions.txt"
+  ext_count="${#filtered_exts[@]}"
+
+  if [[ $ext_count -gt 0 ]] && ask "Install Cursor extensions? ($ext_count extensions)"; then
     if $DRY_RUN; then
       dry "would install $ext_count Cursor extensions"
     else
       installed_count=0
-      while IFS= read -r ext; do
-        [[ -z "$ext" ]] && continue
+      for ext in "${filtered_exts[@]}"; do
         cursor --install-extension "$ext" --force 2>/dev/null && ((installed_count++)) || true
-      done < "$DOTFILES_DIR/cursor/extensions.txt"
+      done
       ok "$installed_count Cursor extensions installed"
     fi
   else

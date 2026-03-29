@@ -35,6 +35,10 @@ Interactive bootstrap script. Idempotent — safe to re-run. Supports `--dry-run
 8. macOS defaults
 9. workspace-sync service
 
+## Per-machine config (.local.conf)
+
+Copy `.local.conf.example` to `.local.conf` to customize what `install.sh` runs on this machine. The file is gitignored and won't sync. It uses bash arrays and is sourced automatically. Supports `skip_*` (exclude) and `only_*` (allowlist) for sections, brew formulae, casks, taps, stow packages, and cursor extensions. `only_*` takes precedence over `skip_*` when both are set. CLI `--skip` flags merge with `skip_sections`.
+
 ## When editing configs
 
 Since stow creates symlinks, editing `~/.zshrc` (or any stowed file) directly edits the repo copy. The auto-sync service will commit and push the change within 15 minutes, or run `workspace-sync` manually.
