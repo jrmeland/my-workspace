@@ -1,6 +1,6 @@
 # This is Git's per-user configuration file.
 [user]
-	email = joshmelander@gmail.com
+	email = josh.melander@functionhealth.com
 	name = Josh Melander
 [push]
 	autoSetupRemote = true
