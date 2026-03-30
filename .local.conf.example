@@ -7,10 +7,21 @@
 #   - only_* arrays include ONLY the listed items (allowlist mode)
 #   - When both are set for the same category, only_* wins
 #   - CLI --skip flags merge additively with skip_sections
+#   - CLI positional sections override only_sections
+#
+# Policy tip — conservative (work machine):
+#   Use only_* arrays so new items added to the repo require explicit opt-in.
+#   e.g. only_sections=(...) means a newly added section won't run until you
+#   add it here. Same for only_stow, only_brew, etc.
+#
+# Policy tip — permissive (personal machine):
+#   Leave only_* unset and use skip_* only for things you don't want.
+#   New items sync automatically.
 
 # ── Sections ────────────────────────────────────────────────────────────────
 # Available: preflight brew stow omz tpm nvm bun claude pi cursor ssh secrets macos sync
 #skip_sections=(cursor macos)
+#only_sections=(preflight brew stow omz tpm nvm bun claude pi ssh secrets sync)
 
 # ── Brew formulae ───────────────────────────────────────────────────────────
 #skip_brew=(ffmpeg portaudio go)
@@ -25,7 +36,7 @@
 
 # ── Stow packages ──────────────────────────────────────────────────────────
 #skip_stow=(pi claude)
-#only_stow=(zsh git tmux ghostty nvim)
+#only_stow=(zsh git tmux ghostty sesh tmuxinator nvim)
 
 # ── Cursor extensions ──────────────────────────────────────────────────────
 #skip_cursor_extensions=(dart-code.dart-code dart-code.flutter ms-vscode-remote.remote-wsl)

@@ -101,6 +101,7 @@ done
 
 # Initialize filter arrays (overridden by .local.conf if present)
 skip_sections=()
+only_sections=()
 skip_brew=()
 only_brew=()
 skip_casks=()
@@ -121,6 +122,14 @@ if [[ -f "$LOCAL_CONF" ]]; then
   for s in "${skip_sections[@]+"${skip_sections[@]}"}"; do
     SKIP_SECTIONS+=("$s")
   done
+
+  # Merge config only_sections with CLI positional args
+  # .local.conf only_sections is used when no CLI positional sections are given.
+  if [[ ${#ONLY_SECTIONS[@]} -eq 0 && ${#only_sections[@]} -gt 0 ]]; then
+    for s in "${only_sections[@]}"; do
+      ONLY_SECTIONS+=("$s")
+    done
+  fi
 fi
 
 # Should this section run?
@@ -295,8 +304,9 @@ resolve_stow_conflict() {
     local file=""
     if [[ "$line" == *"existing target is not owned by stow:"* ]]; then
       file="$(echo "$line" | sed 's/.*existing target is not owned by stow: //')"
-    elif [[ "$line" == *"over existing target:"* ]]; then
-      file="$(echo "$line" | sed 's/.*over existing target: //')"
+    elif [[ "$line" == *"over existing target"* ]]; then
+      # Stow 2.x: "over existing target .zshrc since neither a link..."
+      file="$(echo "$line" | sed 's/.*over existing target[: ]*//' | sed 's/ since .*//')"
     fi
     [[ -n "$file" ]] && conflicting_files+=("$HOME/$file")
   done <<< "$stow_output"
@@ -325,13 +335,58 @@ resolve_stow_conflict() {
     printf "    ${DIM}%s${RESET}\n" "$f"
   done
 
-  if ask "Back up existing files and override?"; then
-    for f in "${conflicting_files[@]}"; do
-      backup_file "$f"
-    done
-    return 0
-  fi
-  return 1
+  # Interactive loop: diff / yes / no
+  while true; do
+    if $AUTO_YES || $DRY_RUN; then
+      # In auto/dry-run mode, proceed without prompting
+      break
+    fi
+
+    printf "${BOLD}  ? ${RESET}%s %s " "Back up and override?" "[y/n/d=diff]"
+    read -r answer
+    answer="${answer:-y}"
+
+    case "$answer" in
+      [dD])
+        # Show diff for each conflicting file: existing (local) vs repo
+        for f in "${conflicting_files[@]}"; do
+          local rel="${f#$HOME/}"
+          local repo_file="$DOTFILES_DIR/$pkg/$rel"
+          echo ""
+          printf "    ${BOLD}── %s ──${RESET}\n" "$rel"
+          if [[ -f "$repo_file" && -f "$f" ]]; then
+            # local = current file, repo = what stow would link to
+            diff --color=always -u "$f" "$repo_file" 2>/dev/null | while IFS= read -r diffline; do
+              printf "    %s\n" "$diffline"
+            done
+            if [[ ${PIPESTATUS[0]} -eq 0 ]]; then
+              printf "    ${DIM}(identical)${RESET}\n"
+            fi
+          elif [[ ! -f "$f" ]]; then
+            printf "    ${GREEN}+ new file from repo${RESET}\n"
+          else
+            printf "    ${DIM}(cannot diff — repo file not found at %s)${RESET}\n" "$repo_file"
+          fi
+        done
+        echo ""
+        # Loop back to prompt again
+        ;;
+      [yY])
+        break
+        ;;
+      [nN])
+        return 1
+        ;;
+      *)
+        printf "    ${DIM}Enter y, n, or d${RESET}\n"
+        ;;
+    esac
+  done
+
+  for f in "${conflicting_files[@]}"; do
+    backup_file "$f"
+  done
+  return 0
 }
 
 # ── Secrets scanner ───────────────────────────────────────────────────────────
@@ -505,6 +560,57 @@ if should_run brew; then
       info "Using filtered Brewfile (per .local.conf)"
     fi
 
+    # Show diff between Brewfile and current state
+    brew_diff_shown=false
+    if ! $AUTO_YES; then
+      missing_taps=()
+      missing_brew=()
+      missing_casks=()
+
+      installed_taps="$(brew tap 2>/dev/null)"
+      installed_brew="$(brew list --formula 2>/dev/null)"
+      installed_casks="$(brew list --cask 2>/dev/null)"
+
+      while IFS= read -r line; do
+        if [[ "$line" =~ ^tap[[:space:]]+\"([^\"]+)\" ]]; then
+          echo "$installed_taps" | grep -q "^${BASH_REMATCH[1]}$" || missing_taps+=("${BASH_REMATCH[1]}")
+        elif [[ "$line" =~ ^brew[[:space:]]+\"([^\"]+)\" ]]; then
+          short="${BASH_REMATCH[1]##*/}"
+          echo "$installed_brew" | grep -q "^${short}$" || missing_brew+=("${BASH_REMATCH[1]}")
+        elif [[ "$line" =~ ^cask[[:space:]]+\"([^\"]+)\" ]]; then
+          echo "$installed_casks" | grep -q "^${BASH_REMATCH[1]}$" || missing_casks+=("${BASH_REMATCH[1]}")
+        fi
+      done < "$brewfile"
+
+      total_missing=$(( ${#missing_taps[@]} + ${#missing_brew[@]} + ${#missing_casks[@]} ))
+
+      if [[ $total_missing -eq 0 ]]; then
+        info "Brewfile vs local: everything already installed"
+      else
+        info "Brewfile vs local: ${total_missing} item(s) to install"
+        for t in "${missing_taps[@]+"${missing_taps[@]}"}"; do
+          printf "    ${GREEN}+ tap${RESET}  %s\n" "$t"
+        done
+        for f in "${missing_brew[@]+"${missing_brew[@]}"}"; do
+          printf "    ${GREEN}+ brew${RESET} %s\n" "$f"
+        done
+        for c in "${missing_casks[@]+"${missing_casks[@]}"}"; do
+          printf "    ${GREEN}+ cask${RESET} %s\n" "$c"
+        done
+      fi
+
+      # Check for outdated packages (quick check, no network)
+      outdated="$(brew outdated --formula --quiet 2>/dev/null | head -10)"
+      if [[ -n "$outdated" ]]; then
+        outdated_count="$(echo "$outdated" | wc -l | tr -d ' ')"
+        info "brew outdated: ${outdated_count} formula(e) have newer versions"
+        while IFS= read -r pkg; do
+          [[ -n "$pkg" ]] && printf "    ${YELLOW}↑${RESET} %s\n" "$pkg"
+        done <<< "$outdated"
+      fi
+      brew_diff_shown=true
+    fi
+
     if ask "Install/update packages from Brewfile?"; then
       if $DRY_RUN; then
         if brew bundle check --file="$brewfile" --verbose 2>/dev/null; then
@@ -648,8 +754,8 @@ if [[ -d "$HOME/.nvm" ]]; then
         dry "would install Node $nvm_latest_lts and set as default"
       else
         nvm install --lts
-        nvm alias default lts/*
-        ok "Node $nvm_latest_lts installed and set as default"
+        nvm alias default "$(nvm version lts/*)"
+        ok "Node $(nvm version lts/*) installed and pinned as default"
       fi
     else
       skip "Node LTS upgrade"
@@ -666,8 +772,8 @@ else
       export NVM_DIR="$HOME/.nvm"
       [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
       nvm install --lts
-      nvm alias default lts/*
-      ok "nvm + Node LTS installed"
+      nvm alias default "$(nvm version lts/*)"
+      ok "nvm + Node $(nvm version lts/*) installed and pinned as default"
     fi
   else
     skip "nvm"
