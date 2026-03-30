@@ -289,30 +289,35 @@ backup_file() {
 resolve_stow_conflict() {
   local pkg="$1"
 
-  # Dry-run stow to find conflicts
+  # Dry-run stow to detect conflicts (filter benign simulation warning)
   local stow_output
   stow_output="$(stow --dir="$DOTFILES_DIR" --target="$HOME" --no --restow "$pkg" 2>&1 || true)"
+  stow_output="$(echo "$stow_output" | grep -v "^WARNING: in simulation mode" | grep -v "^$" || true)"
 
   if [[ -z "$stow_output" ]]; then
     return 0  # No conflicts
   fi
 
-  # Extract conflicting file paths from stow output
+  # Find conflicting files by walking the package directory.
+  # This is more reliable than parsing stow's varying output formats.
   local conflicting_files=()
-  while IFS= read -r line; do
-    # Stow 2.x format: "existing target is not owned by stow: .zshrc"
-    local file=""
-    if [[ "$line" == *"existing target is not owned by stow:"* ]]; then
-      file="$(echo "$line" | sed 's/.*existing target is not owned by stow: //')"
-    elif [[ "$line" == *"over existing target"* ]]; then
-      # Stow 2.x: "over existing target .zshrc since neither a link..."
-      file="$(echo "$line" | sed 's/.*over existing target[: ]*//' | sed 's/ since .*//')"
+  while IFS= read -r repo_file; do
+    local rel="${repo_file#$DOTFILES_DIR/$pkg/}"
+    local target="$HOME/$rel"
+    # Conflict = target exists and is NOT already a stow-managed symlink for this package
+    if [[ -e "$target" || -L "$target" ]]; then
+      if [[ -L "$target" ]]; then
+        local link_target
+        link_target="$(readlink "$target")"
+        # Already linked to our package — not a conflict
+        [[ "$link_target" == *"$pkg/$rel"* ]] && continue
+      fi
+      conflicting_files+=("$target")
     fi
-    [[ -n "$file" ]] && conflicting_files+=("$HOME/$file")
-  done <<< "$stow_output"
+  done < <(find "$DOTFILES_DIR/$pkg" -type f -not -name '.DS_Store')
 
   if [[ ${#conflicting_files[@]} -eq 0 ]]; then
-    # Couldn't parse specific files — show raw output
+    # Stow reported something but we found no file-level conflicts
     warn "Stow conflict for '$pkg':"
     while IFS= read -r line; do
       [[ -n "$line" ]] && printf "    ${DIM}%s${RESET}\n" "$line"
@@ -355,7 +360,6 @@ resolve_stow_conflict() {
           echo ""
           printf "    ${BOLD}── %s ──${RESET}\n" "$rel"
           if [[ -f "$repo_file" && -f "$f" ]]; then
-            # local = current file, repo = what stow would link to
             diff --color=always -u "$f" "$repo_file" 2>/dev/null | while IFS= read -r diffline; do
               printf "    %s\n" "$diffline"
             done
