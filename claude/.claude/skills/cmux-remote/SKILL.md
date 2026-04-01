@@ -5,34 +5,61 @@ description: "Working inside cmux over SSH/remote. Use when CMUX_SOCKET_PATH is 
 
 # cmux Remote Workspace Skill
 
-You are running inside **cmux** via a remote/SSH connection. The remote daemon CLI has a limited set of top-level commands, but **`cmux rpc <method> [json-params]`** gives full access to all capabilities.
+You are running inside **cmux** via a remote/SSH connection. The remote daemon CLI has a limited set of top-level commands, but `cmux rpc <method> [json-params]` gives full access to all capabilities.
 
 ## Core Principle
 
 **Never block this pane with long-running processes.** Spawn them in a new split pane and read their output when needed.
 
-## Hierarchy
+## cmux-helper
 
+This skill includes a helper script at `SKILL_DIR/cmux-helper` that wraps common operations and **resolves short refs (surface:N) to UUIDs automatically** — which is required in remote mode since ref-based RPC params don't work reliably over the TCP relay.
+
+Set up the helper path at the start of a session:
+
+```bash
+CMUX="$HOME/.claude/skills/cmux-remote/cmux-helper"
 ```
-Window
-└── Workspace (sidebar entry)
-    └── Pane (split region)
-        └── Surface (tab within a pane)
+
+### Helper Commands
+
+```bash
+# Layout
+$CMUX tree                    # Pretty-print current workspace
+$CMUX tree --all              # All workspaces
+$CMUX surfaces                # Tab-separated list: ref, uuid, pane, type, title
+
+# Read surface content
+$CMUX read surface:3                       # Current screen
+$CMUX read surface:3 --lines 50           # Last N lines
+$CMUX read surface:3 --scrollback         # Full scrollback history
+
+# Send text / keys / commands
+$CMUX send surface:3 "some text"          # Send text (no Enter)
+$CMUX send-key surface:3 "Return"         # Press Enter
+$CMUX send-key surface:3 "C-c"           # Ctrl+C
+$CMUX exec surface:3 "npm run dev"        # Send command + Enter
+
+# Resolve ref to UUID (for direct rpc calls)
+$CMUX resolve surface:3
 ```
 
-## Addressing
-
-Commands accept UUIDs or short refs: `workspace:1`, `pane:2`, `surface:3`, `window:1`.
-The current workspace/surface is auto-detected from `CMUX_WORKSPACE_ID` and `CMUX_SURFACE_ID`.
+All commands accept short refs (`surface:N`, `pane:N`) or full UUIDs.
 
 ## Direct CLI Commands
 
-These work as top-level commands in remote mode:
+These top-level commands work in remote mode without the helper:
 
 ```bash
-# Connectivity
-cmux ping
-cmux capabilities
+# Panes & surfaces
+cmux new-split <left|right|up|down> [--surface <id|ref>]
+cmux new-surface [--pane <id|ref>]
+cmux close-surface [--surface <id|ref>]
+
+# Send text & keys (these accept short refs directly)
+cmux send [--surface <id|ref>] "command text"
+cmux send-key [--surface <id|ref>] "Return"
+cmux send-key [--surface <id|ref>] "C-c"
 
 # Workspaces
 cmux list-workspaces
@@ -40,108 +67,42 @@ cmux new-workspace [--name <title>] [--cwd <path>]
 cmux close-workspace --workspace <id|ref>
 cmux select-workspace --workspace <id|ref>
 
-# Panes & surfaces
-cmux new-split <left|right|up|down> [--surface <id|ref>]
-cmux new-surface [--pane <id|ref>]
-cmux close-surface [--surface <id|ref>]
-
-# Send text & keys
-cmux send [--surface <id|ref>] "command text"
-cmux send-key [--surface <id|ref>] "Return"
-cmux send-key [--surface <id|ref>] "C-c"    # Ctrl+C
-cmux send-key [--surface <id|ref>] "C-d"    # Ctrl+D / EOF
-
 # Notifications
 cmux notify --title "Done" --body "Task complete"
 
-# Windows
-cmux new-window
-
-# Browser (subcommands)
+# Browser
 cmux browser open <url>
 cmux browser open-split <url>
 ```
 
-### Combined: send command + execute
-
-```bash
-cmux send --surface surface:3 "npm run dev" && cmux send-key --surface surface:3 "Return"
-```
-
 ## RPC Commands
 
-For everything else, use `cmux rpc <method> [json-params]`. The JSON params argument is optional — omit it for parameterless calls.
+For operations not covered by the helper or direct CLI, use `cmux rpc <method> [json-params]`.
 
-### Layout & Discovery
+**Important:** In remote mode, RPC params that take surface/pane/workspace references must use `surface_id` (full UUID), not `surface_ref` (short ref). Use `$CMUX resolve surface:N` to get the UUID.
 
-```bash
-# Full tree of all windows, workspaces, panes, surfaces
-cmux rpc system.tree
-
-# Tree of current workspace only
-cmux rpc system.tree '{"workspace_id":"'$CMUX_WORKSPACE_ID'"}'
-
-# Identify current context
-cmux rpc system.identify
-
-# List panes in current workspace
-cmux rpc pane.list
-
-# List surfaces in a pane
-cmux rpc pane.surfaces '{"pane_ref":"pane:1"}'
-```
-
-### Reading Output from Other Panes
+### Workspace Management
 
 ```bash
-# Read current visible screen
-cmux rpc surface.read_text '{"surface_ref":"surface:3"}'
-
-# Read with scrollback
-cmux rpc surface.read_text '{"surface_ref":"surface:3","scrollback":true}'
-
-# Read last N lines
-cmux rpc surface.read_text '{"surface_ref":"surface:3","lines":50}'
+cmux rpc workspace.rename '{"name":"My Server"}'
+cmux rpc workspace.current
+cmux rpc workspace.next
+cmux rpc workspace.previous
 ```
 
 ### Pane Management
 
 ```bash
-# Focus a pane
-cmux rpc pane.focus '{"pane_ref":"pane:2"}'
-
-# Resize a pane
-cmux rpc pane.resize '{"pane_ref":"pane:2","direction":"right","amount":20}'
-
-# Swap panes
-cmux rpc pane.swap '{"pane_ref":"pane:2","target_pane_ref":"pane:3"}'
-
-# Break pane to new workspace
-cmux rpc pane.break '{"pane_ref":"pane:2"}'
+# Use resolve for pane UUIDs
+PANE_UUID=$($CMUX resolve pane:2)
+cmux rpc pane.focus "{\"pane_id\":\"$PANE_UUID\"}"
+cmux rpc pane.resize "{\"pane_id\":\"$PANE_UUID\",\"direction\":\"right\",\"amount\":20}"
 ```
 
-### Workspace Management
+### Notifications (via RPC)
 
 ```bash
-# Rename workspace
-cmux rpc workspace.rename '{"name":"My Server"}'
-
-# Current workspace info
-cmux rpc workspace.current
-
-# Navigate workspaces
-cmux rpc workspace.next
-cmux rpc workspace.previous
-cmux rpc workspace.last
-```
-
-### Notifications
-
-```bash
-# Create notification
 cmux rpc notification.create '{"title":"Build Done","body":"All tests passed"}'
-
-# List/clear notifications
 cmux rpc notification.list
 cmux rpc notification.clear
 ```
@@ -152,56 +113,41 @@ cmux rpc notification.clear
 cmux rpc markdown.open '{"path":"/absolute/path/to/README.md"}'
 ```
 
-### Surface Management
+## Browser Automation
+
+Basic operations via direct CLI:
 
 ```bash
-# List all surfaces
-cmux rpc surface.list
-
-# Get current surface
-cmux rpc surface.current
-
-# Clear scrollback history
-cmux rpc surface.clear_history '{"surface_ref":"surface:3"}'
+cmux browser open http://localhost:3000
+cmux browser open-split https://github.com
 ```
 
-### Find Window
+Full browser API via RPC (use UUIDs):
 
 ```bash
-# Search by name
-cmux rpc -- find-window not available via rpc; use list-workspaces and filter
-```
+SURF=$($CMUX resolve surface:5)
+WS="$CMUX_WORKSPACE_ID"
 
-## Browser Automation (via RPC)
-
-The direct `cmux browser` subcommand supports basic operations. For the full browser API, use RPC:
-
-```bash
 # Snapshot (accessibility tree) — primary way to "see" the page
-cmux rpc browser.snapshot '{"surface_ref":"surface:5","interactive":true,"compact":true}'
+cmux rpc browser.snapshot "{\"surface_id\":\"$SURF\",\"interactive\":true,\"compact\":true}"
 
 # Navigate
-cmux rpc browser.navigate '{"surface_ref":"surface:5","url":"https://example.com"}'
+cmux rpc browser.navigate "{\"surface_id\":\"$SURF\",\"url\":\"https://example.com\"}"
 
 # Click
-cmux rpc browser.click '{"surface_ref":"surface:5","selector":"button#submit"}'
+cmux rpc browser.click "{\"surface_id\":\"$SURF\",\"selector\":\"button#submit\"}"
 
 # Fill form
-cmux rpc browser.fill '{"surface_ref":"surface:5","selector":"input[name=email]","value":"user@example.com"}'
+cmux rpc browser.fill "{\"surface_id\":\"$SURF\",\"selector\":\"input[name=email]\",\"value\":\"user@example.com\"}"
 
 # Wait for condition
-cmux rpc browser.wait '{"surface_ref":"surface:5","text":"Success"}'
+cmux rpc browser.wait "{\"surface_id\":\"$SURF\",\"text\":\"Success\"}"
 
 # Screenshot
-cmux rpc browser.screenshot '{"surface_ref":"surface:5","out":"/tmp/page.png"}'
+cmux rpc browser.screenshot "{\"surface_id\":\"$SURF\",\"out\":\"/tmp/page.png\"}"
 
 # Evaluate JS
-cmux rpc browser.eval '{"surface_ref":"surface:5","script":"document.title"}'
-
-# Get page info
-cmux rpc browser.get.title '{"surface_ref":"surface:5"}'
-cmux rpc browser.get.text '{"surface_ref":"surface:5","selector":"h1"}'
-cmux rpc browser.get.url '{"surface_ref":"surface:5"}'
+cmux rpc browser.eval "{\"surface_id\":\"$SURF\",\"script\":\"document.title\"}"
 ```
 
 ## Workflows
@@ -209,50 +155,62 @@ cmux rpc browser.get.url '{"surface_ref":"surface:5"}'
 ### Run Tests in a Separate Pane
 
 ```bash
-# 1. Create a split pane
+CMUX="$HOME/.claude/skills/cmux-remote/cmux-helper"
+
+# 1. Check existing layout
+$CMUX tree
+
+# 2. Create a split pane
 cmux new-split right
 
-# 2. Find the new surface ref
-cmux rpc system.tree
+# 3. Find the new surface
+$CMUX surfaces
 
-# 3. Send the test command
-cmux send --surface surface:NEW "pytest tests/ -v" && cmux send-key --surface surface:NEW "Return"
+# 4. Run tests
+$CMUX exec surface:NEW "pytest tests/ -v"
 
-# 4. Later, check test output
-cmux rpc surface.read_text '{"surface_ref":"surface:NEW","scrollback":true,"lines":100}'
+# 5. Check output later
+$CMUX read surface:NEW --scrollback --lines 100
 ```
 
 ### Start a Dev Server
 
 ```bash
 cmux new-split down
-cmux rpc system.tree
-cmux send --surface surface:NEW "npm run dev" && cmux send-key --surface surface:NEW "Return"
-cmux rpc surface.read_text '{"surface_ref":"surface:NEW","lines":20}'
+$CMUX surfaces
+$CMUX exec surface:NEW "npm run dev"
+$CMUX read surface:NEW --lines 20
 ```
 
 ### Stop a Running Process
 
 ```bash
-cmux send-key --surface surface:3 "C-c"
-cmux rpc surface.read_text '{"surface_ref":"surface:3","lines":5}'
+$CMUX send-key surface:3 "C-c"
+$CMUX read surface:3 --lines 5
 ```
 
 ### Build with Notification
 
 ```bash
 cmux new-split down
-cmux send --surface surface:NEW "npm run build && cmux notify --title 'Build Done' --body 'Success' || cmux notify --title 'Build Failed' --body 'Check output'" && cmux send-key --surface surface:NEW "Return"
+$CMUX surfaces
+$CMUX exec surface:NEW "npm run build && cmux notify --title 'Build Done' --body 'Success' || cmux notify --title 'Build Failed' --body 'Check output'"
 ```
 
 ## Practical Tips
 
-1. **Always run `cmux rpc system.tree`** before creating new panes to see what exists.
-2. **After `cmux new-split`**, run `cmux rpc system.tree` to find the new surface ref.
-3. **Use `cmux rpc surface.read_text` with `"scrollback":true`** to see full output.
-4. **Use `cmux notify`** to alert the user when long tasks complete.
-5. **Send Ctrl+C** with `cmux send-key --surface <ref> "C-c"` before sending new commands to a busy pane.
-6. **RPC returns JSON** — pipe through `python3 -m json.tool` for readability if needed.
+1. **Set `CMUX` var at session start**: `CMUX="$HOME/.claude/skills/cmux-remote/cmux-helper"`
+2. **Always run `$CMUX tree`** before creating panes to see what exists.
+3. **After `cmux new-split`**, run `$CMUX surfaces` to find the new surface ref.
+4. **Use `$CMUX read <ref> --scrollback`** to see full output including what scrolled off-screen.
+5. **Use `cmux notify`** to alert the user when long tasks complete.
+6. **Send Ctrl+C** with `$CMUX send-key <ref> "C-c"` before sending new commands to a busy pane.
+
+## Known Limitations (Remote Mode)
+
+- **Ref-based RPC params fail silently** — always use UUIDs via `$CMUX resolve` or use the helper commands which handle this automatically.
+- The direct CLI commands (`cmux send`, `cmux send-key`, `cmux new-split`) accept short refs and work fine.
+- `cmux rpc` calls require full UUIDs for surface/pane/workspace targeting.
 
 ## Key Bindings Reference (for the user)
 

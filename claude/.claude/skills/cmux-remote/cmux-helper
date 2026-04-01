@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# cmux-helper — wrapper for cmux remote sessions that resolves short refs to UUIDs
+# Usage: cmux-helper <command> [args...]
+#
+# Commands:
+#   tree                           Pretty-print workspace layout
+#   tree --all                     Pretty-print all workspaces
+#   surfaces                       List surfaces in current workspace (ref, uuid, type, title)
+#   read <ref|uuid> [--lines N] [--scrollback]   Read surface content
+#   send <ref|uuid> <text>         Send text to a surface
+#   send-key <ref|uuid> <key>      Send a key to a surface
+#   exec <ref|uuid> <command>      Send command + Return to a surface
+#   resolve <ref>                  Resolve a short ref to UUID
+
+set -euo pipefail
+
+WS_ID="${CMUX_WORKSPACE_ID:-}"
+
+die() { echo "error: $*" >&2; exit 1; }
+
+# Resolve a short ref (surface:N) to a UUID via system.tree
+resolve_ref() {
+  local ref="$1"
+  # If it's already a UUID (contains dashes, 36 chars), pass through
+  if [[ "$ref" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+    echo "$ref"
+    return
+  fi
+  local uuid
+  uuid=$(cmux rpc system.tree 2>/dev/null | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+ref = '$ref'
+for w in data.get('windows', []):
+    for ws in w.get('workspaces', []):
+        for p in ws.get('panes', []):
+            for s in p.get('surfaces', []):
+                if s.get('ref') == ref:
+                    print(s['id'])
+                    sys.exit(0)
+            if p.get('ref') == ref:
+                print(p['id'])
+                sys.exit(0)
+        if ws.get('ref') == ref:
+            print(ws['id'])
+            sys.exit(0)
+    if w.get('ref') == ref:
+        print(w['id'])
+        sys.exit(0)
+print('')
+" 2>/dev/null)
+  [[ -n "$uuid" ]] || die "could not resolve ref: $ref"
+  echo "$uuid"
+}
+
+cmd_tree() {
+  local all_flag=""
+  [[ "${1:-}" == "--all" ]] && all_flag="true"
+
+  cmux rpc system.tree 2>/dev/null | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+ws_filter = None if '$all_flag' else '${WS_ID}'
+for w in data.get('windows', []):
+    for ws in w.get('workspaces', []):
+        if ws_filter and ws['id'] != ws_filter:
+            continue
+        sel = '>' if ws.get('selected') else ' '
+        print(f'{sel} {ws[\"ref\"]} \"{ws[\"title\"]}\"')
+        for p in ws.get('panes', []):
+            foc = '*' if p.get('focused') else ' '
+            print(f'  {foc} {p[\"ref\"]}')
+            for s in p.get('surfaces', []):
+                tab = '>' if s.get('selected_in_pane') else ' '
+                print(f'    {tab} {s[\"ref\"]} [{s[\"type\"]}] {s[\"id\"][:8]}… \"{s.get(\"title\",\"\")}\"')
+"
+}
+
+cmd_surfaces() {
+  cmux rpc system.tree 2>/dev/null | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+ws_id = '${WS_ID}'
+for w in data.get('windows', []):
+    for ws in w.get('workspaces', []):
+        if ws['id'] != ws_id:
+            continue
+        for p in ws.get('panes', []):
+            for s in p.get('surfaces', []):
+                sel = '*' if s.get('selected_in_pane') else ' '
+                print(f'{sel} {s[\"ref\"]}\t{s[\"id\"]}\t{p[\"ref\"]}\t{s[\"type\"]}\t{s.get(\"title\",\"\")}')
+"
+}
+
+cmd_read() {
+  local ref="$1"; shift
+  local uuid
+  uuid=$(resolve_ref "$ref")
+  local lines=""
+  local scrollback=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --lines) lines="$2"; shift 2 ;;
+      --scrollback) scrollback="true"; shift ;;
+      *) die "unknown flag: $1" ;;
+    esac
+  done
+  local params="{\"surface_id\":\"$uuid\""
+  [[ -n "$WS_ID" ]] && params="$params,\"workspace_id\":\"$WS_ID\""
+  [[ -n "$lines" ]] && params="$params,\"lines\":$lines"
+  [[ -n "$scrollback" ]] && params="$params,\"scrollback\":true"
+  params="$params}"
+  cmux rpc surface.read_text "$params" 2>&1 | python3 -c "import json,sys; print(json.load(sys.stdin).get('text',''))"
+}
+
+cmd_send() {
+  local ref="$1"; shift
+  local text="$*"
+  local uuid
+  uuid=$(resolve_ref "$ref")
+  cmux rpc surface.send_text "{\"surface_id\":\"$uuid\",\"workspace_id\":\"$WS_ID\",\"text\":\"$text\"}" 2>&1
+}
+
+cmd_send_key() {
+  local ref="$1"; shift
+  local key="$1"
+  local uuid
+  uuid=$(resolve_ref "$ref")
+  cmux rpc surface.send_key "{\"surface_id\":\"$uuid\",\"workspace_id\":\"$WS_ID\",\"key\":\"$key\"}" 2>&1
+}
+
+cmd_exec() {
+  local ref="$1"; shift
+  local command="$*"
+  local uuid
+  uuid=$(resolve_ref "$ref")
+  cmux rpc surface.send_text "{\"surface_id\":\"$uuid\",\"workspace_id\":\"$WS_ID\",\"text\":\"$command\"}" 2>/dev/null
+  cmux rpc surface.send_key "{\"surface_id\":\"$uuid\",\"workspace_id\":\"$WS_ID\",\"key\":\"Return\"}" 2>/dev/null
+  echo "sent: $command"
+}
+
+cmd_resolve() {
+  resolve_ref "$1"
+}
+
+case "${1:-help}" in
+  tree)       shift; cmd_tree "$@" ;;
+  surfaces)   shift; cmd_surfaces "$@" ;;
+  read)       shift; cmd_read "$@" ;;
+  send)       shift; cmd_send "$@" ;;
+  send-key)   shift; cmd_send_key "$@" ;;
+  exec)       shift; cmd_exec "$@" ;;
+  resolve)    shift; cmd_resolve "$@" ;;
+  help|-h|--help)
+    cat <<'USAGE'
+cmux-helper — cmux remote session wrapper with ref resolution
+
+Commands:
+  tree [--all]                              Pretty-print workspace layout
+  surfaces                                  List surfaces (ref, uuid, pane, type, title)
+  read <ref> [--lines N] [--scrollback]     Read surface content (text only)
+  send <ref> <text>                         Send text to a surface
+  send-key <ref> <key>                      Send a key (Return, C-c, C-d, etc.)
+  exec <ref> <command>                      Send command + Return
+  resolve <ref>                             Resolve short ref to UUID
+
+Refs: surface:N, pane:N, workspace:N, or full UUIDs.
+USAGE
+    ;;
+  *) die "unknown command: $1 (try: cmux-helper help)" ;;
+esac
