@@ -67,5 +67,8 @@
         "editor.defaultFormatter": "vscode.json-language-features"
     },
     "githubPullRequests.fileListLayout": "flat",
-    "githubPullRequests.terminalLinksHandler": "github"
+    "githubPullRequests.terminalLinksHandler": "github",
+    "remote.SSH.remotePlatform": {
+        "mithril": "linux"
+    }
 }
