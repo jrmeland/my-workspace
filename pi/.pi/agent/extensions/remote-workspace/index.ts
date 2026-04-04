@@ -282,6 +282,11 @@ export default function (pi: ExtensionAPI) {
 	let remoteCfg: RemoteConfig | null = null;
 	const getRemote = () => remoteCfg;
 
+	// Handoff state
+	let handoffLocalSessionFile: string | null = null;
+	let handoffRemoteSessionFile: string | null = null;
+	const HANDOFF_TMUX_SESSION = "pi-handoff";
+
 	// ── Connection health & auto-reconnect ──────────────────────────────
 
 	let connectionHealthy = false;
@@ -720,6 +725,244 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.setStatus("remote", ctx.ui.theme.fg("error", `❌ Switch failed`));
 				ctx.ui.notify(`Switch failed: ${err.message}`, "error");
 			}
+		},
+	});
+
+	// ── Handoff: transfer session to remote for autonomous work ─────────
+
+	pi.registerCommand("remote-handoff", {
+		description:
+			'Transfer session to remote machine for autonomous work. ' +
+			'Usage: /remote-handoff [prompt to continue with]',
+		handler: async (args, ctx) => {
+			const cfg = getRemote();
+			if (!cfg) {
+				ctx.ui.notify("Not in remote mode. Start pi with --remote flag.", "error");
+				return;
+			}
+
+			// 1. Check prerequisites on remote
+			ctx.ui.setStatus("remote", "Checking remote prerequisites…");
+			const checks: { name: string; cmd: string; fix: string }[] = [
+				{ name: "pi", cmd: "zsh -lc 'which pi'", fix: "Install pi: npm install -g @mariozechner/pi-coding-agent" },
+				{ name: "tmux", cmd: "which tmux", fix: "Install tmux: brew install tmux" },
+				{ name: "API keys", cmd: "test -f ~/.secrets", fix: "Create ~/.secrets with API keys (see secrets.template)" },
+			];
+			for (const check of checks) {
+				try {
+					await sshExec(cfg, check.cmd, { retries: 0 });
+				} catch {
+					ctx.ui.setStatus("remote", ctx.ui.theme.fg("error", `❌ Handoff failed: ${check.name} missing`));
+					ctx.ui.notify(`Prerequisite missing on ${cfg.remote}: ${check.name}. ${check.fix}`, "error");
+					return;
+				}
+			}
+
+			// 2. Wait for agent to be idle
+			ctx.ui.setStatus("remote", "Waiting for agent to finish current work…");
+			await ctx.waitForIdle();
+
+			// 3. Get current session file
+			const sessionFile = ctx.sessionManager.getSessionFile();
+			if (!sessionFile) {
+				ctx.ui.notify("No session file to transfer (ephemeral session?).", "error");
+				return;
+			}
+
+			// 4. Prepare remote session directory and copy
+			ctx.ui.setStatus("remote", "Transferring session…");
+			const remoteSessionDir = "~/.pi/agent/sessions/_handoff";
+			const remoteSessionFile = `${remoteSessionDir}/session.jsonl`;
+
+			try {
+				await sshExec(cfg, `mkdir -p ${remoteSessionDir}`);
+
+				// SCP via ControlMaster
+				const scpResult = await pi.exec("scp", [
+					"-o", `ControlPath=${cfg.controlPath}`,
+					"-o", "ControlMaster=auto",
+					sessionFile,
+					`${cfg.remote}:${remoteSessionFile}`,
+				]);
+				if (scpResult.code !== 0) {
+					throw new Error(`SCP failed: ${scpResult.stderr}`);
+				}
+			} catch (err: any) {
+				ctx.ui.setStatus("remote", ctx.ui.theme.fg("error", "❌ Session transfer failed"));
+				ctx.ui.notify(`Failed to transfer session: ${err.message}`, "error");
+				return;
+			}
+
+			// 5. Start remote pi in tmux
+			ctx.ui.setStatus("remote", "Starting remote agent…");
+			try {
+				// Kill any existing handoff session
+				await sshExec(cfg, `tmux kill-session -t ${HANDOFF_TMUX_SESSION} 2>/dev/null || true`);
+
+				// Resolve the remote session path (expand ~)
+				const resolvedRemoteSession = (await sshExec(cfg, `echo ${remoteSessionFile}`)).toString().trim();
+
+				// Start pi in tmux with login shell (so nvm/mise PATH works)
+				const piCmd = `cd ${shellQuote(cfg.remoteCwd)} && pi --session ${shellQuote(resolvedRemoteSession)}`;
+				await sshExec(cfg, `tmux new-session -d -s ${HANDOFF_TMUX_SESSION} "zsh -lc ${shellQuote(piCmd)}"`);
+
+				// Wait for pi to load
+				await sleep(6000);
+
+				// 6. Send the follow-up prompt if provided
+				const prompt = args?.trim();
+				if (prompt) {
+					await sshExec(cfg, `tmux send-keys -t ${HANDOFF_TMUX_SESSION} ${shellQuote(prompt)} Enter`);
+				}
+			} catch (err: any) {
+				ctx.ui.setStatus("remote", ctx.ui.theme.fg("error", "❌ Failed to start remote agent"));
+				ctx.ui.notify(`Failed to start remote pi: ${err.message}`, "error");
+				return;
+			}
+
+			// 7. Store handoff state and update UI
+			handoffLocalSessionFile = sessionFile;
+			handoffRemoteSessionFile = remoteSessionFile;
+
+			const promptNote = args?.trim() ? ` with prompt: "${args.trim().slice(0, 50)}..."` : " (waiting for input)";
+			ctx.ui.setStatus(
+				"remote",
+				ctx.ui.theme.fg("accent", `🔄 Handed off to ${cfg.remote} (tmux: ${HANDOFF_TMUX_SESSION})`),
+			);
+			ctx.ui.notify(
+				`Session handed off to ${cfg.remote}${promptNote}. ` +
+				`Check with /remote-handoff-status. Retrieve with /remote-takeback.`,
+				"info",
+			);
+		},
+	});
+
+	pi.registerCommand("remote-handoff-status", {
+		description: "Check on the remote agent's progress",
+		handler: async (_args, ctx) => {
+			const cfg = getRemote();
+			if (!cfg) {
+				ctx.ui.notify("Not in remote mode.", "error");
+				return;
+			}
+
+			try {
+				// Check if tmux session exists
+				await sshExec(cfg, `tmux has-session -t ${HANDOFF_TMUX_SESSION}`, { retries: 0 });
+
+				// Capture recent output
+				const output = await sshExec(cfg, `tmux capture-pane -t ${HANDOFF_TMUX_SESSION} -p -S -30`);
+				const lines = output.toString().trim();
+
+				ctx.ui.notify(
+					`Remote agent is running (tmux: ${HANDOFF_TMUX_SESSION}).\n` +
+					`Last output:\n${lines.slice(-500)}`,
+					"info",
+				);
+			} catch {
+				ctx.ui.notify(
+					`No remote agent running (tmux session '${HANDOFF_TMUX_SESSION}' not found). ` +
+					`It may have finished or been stopped.`,
+					"warning",
+				);
+			}
+		},
+	});
+
+	pi.registerCommand("remote-takeback", {
+		description: "Retrieve session from remote machine and resume locally",
+		handler: async (_args, ctx) => {
+			const cfg = getRemote();
+			if (!cfg) {
+				ctx.ui.notify("Not in remote mode.", "error");
+				return;
+			}
+
+			const remoteFile = handoffRemoteSessionFile || "~/.pi/agent/sessions/_handoff/session.jsonl";
+			const localFile = handoffLocalSessionFile;
+
+			// 1. Check if remote agent is still running
+			let remoteRunning = false;
+			try {
+				await sshExec(cfg, `tmux has-session -t ${HANDOFF_TMUX_SESSION}`, { retries: 0 });
+				remoteRunning = true;
+			} catch {
+				// Not running — that's fine
+			}
+
+			if (remoteRunning) {
+				// Show what the remote agent is doing
+				const output = await sshExec(cfg, `tmux capture-pane -t ${HANDOFF_TMUX_SESSION} -p -S -10`);
+				const lastLines = output.toString().trim().slice(-300);
+
+				const ok = await ctx.ui.confirm(
+					"Remote agent is still running",
+					`Stop it and take back the session?\n\nLast output:\n${lastLines}`,
+				);
+				if (!ok) {
+					ctx.ui.notify("Takeback cancelled.", "info");
+					return;
+				}
+
+				// Send Ctrl+C twice then Ctrl+D to stop pi gracefully
+				ctx.ui.setStatus("remote", "Stopping remote agent…");
+				await sshExec(cfg, `tmux send-keys -t ${HANDOFF_TMUX_SESSION} C-c`);
+				await sleep(500);
+				await sshExec(cfg, `tmux send-keys -t ${HANDOFF_TMUX_SESSION} C-c`);
+				await sleep(500);
+				await sshExec(cfg, `tmux send-keys -t ${HANDOFF_TMUX_SESSION} C-d`);
+				await sleep(2000);
+
+				// Force kill if still alive
+				try {
+					await sshExec(cfg, `tmux kill-session -t ${HANDOFF_TMUX_SESSION}`, { retries: 0 });
+				} catch { /* already dead */ }
+			}
+
+			// 2. Transfer session file back
+			ctx.ui.setStatus("remote", "Retrieving session…");
+
+			// Determine where to save locally
+			const localTarget = localFile || join(
+				homedir(),
+				".pi/agent/sessions/_handoff",
+				"session-takeback.jsonl",
+			);
+
+			try {
+				// Ensure local directory exists
+				const localDir = localTarget.substring(0, localTarget.lastIndexOf("/"));
+				await pi.exec("mkdir", ["-p", localDir]);
+
+				const scpResult = await pi.exec("scp", [
+					"-o", `ControlPath=${cfg.controlPath}`,
+					"-o", "ControlMaster=auto",
+					`${cfg.remote}:${remoteFile}`,
+					localTarget,
+				]);
+				if (scpResult.code !== 0) {
+					throw new Error(`SCP failed: ${scpResult.stderr}`);
+				}
+			} catch (err: any) {
+				ctx.ui.setStatus("remote", ctx.ui.theme.fg("error", "❌ Takeback failed"));
+				ctx.ui.notify(`Failed to retrieve session: ${err.message}`, "error");
+				return;
+			}
+
+			// 3. Clear handoff state
+			handoffLocalSessionFile = null;
+			handoffRemoteSessionFile = null;
+
+			// 4. Tell user how to resume
+			ctx.ui.setStatus(
+				"remote",
+				ctx.ui.theme.fg("accent", `🔗 ${cfg.remote}:${cfg.remoteCwd} (session retrieved)`),
+			);
+			ctx.ui.notify(
+				`Session retrieved from ${cfg.remote}. Resume with:\n` +
+				`  pi --remote ${cfg.remote}:${cfg.remoteCwd} --session ${localTarget}`,
+				"info",
+			);
 		},
 	});
 
