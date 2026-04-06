@@ -47,15 +47,15 @@ export default function (pi: ExtensionAPI) {
     "",
     "**Key rules:**",
     "- NEVER run long-running processes (servers, test suites, builds, log tails, watchers) in this pane.",
-    "- Instead, use `cmux new-split right` or `cmux new-split down` to create a new pane, then `cmux send` + `cmux send-key` to run the command there.",
-    "- Use `cmux read-screen --surface <ref> --scrollback` to check output from other panes.",
-    "- Run `cmux tree` to discover the current layout before creating new panes.",
-    "- Use the cmux_notify tool to alert the user when background tasks complete.",
-    "- Use the cmux_status tool to show what you're working on in the sidebar.",
-    "- Use the cmux_progress tool to show progress on multi-step work.",
-    "- Use the cmux_log tool to log notable events to the workspace sidebar.",
+    "- Instead, use the cmux_new_split tool to create a new pane, then cmux_exec to run the command there.",
+    "- Use cmux_read_screen to check output from other panes.",
+    "- Run cmux_tree to discover the current layout before creating new panes.",
+    "- Use cmux_notify to alert the user when background tasks complete.",
+    "- Use cmux_status to show what you're working on in the sidebar.",
+    "- Use cmux_progress to show progress on multi-step work.",
+    "- Use cmux_log to log notable events to the workspace sidebar.",
     "",
-    "Run `cmux tree` first to see what panes already exist.",
+    "Run cmux_tree first to see what panes already exist.",
     "",
   ].join("\n");
 
@@ -249,6 +249,159 @@ export default function (pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: `Logged: ${params.message}` }],
         details: { message: params.message, level: params.level ?? "info" },
+      };
+    },
+  });
+
+  // ---------------------------------------------------------------------------
+  // Tool: cmux_tree
+  // ---------------------------------------------------------------------------
+
+  pi.registerTool({
+    name: "cmux_tree",
+    label: "cmux Tree",
+    description:
+      "Show the cmux workspace layout: windows, workspaces, panes, and surfaces. Use to discover surface refs before sending commands or reading output.",
+    promptSnippet: "Show cmux workspace layout tree to discover panes and surfaces",
+    parameters: Type.Object({
+      all: Type.Optional(
+        Type.Boolean({ description: "Include all windows, not just current (default: false)" })
+      ),
+    }),
+    async execute(_toolCallId, params, signal) {
+      const args = ["tree"];
+      if (params.all) args.push("--all");
+      const output = await cmux(args, signal);
+      return {
+        content: [{ type: "text", text: output }],
+        details: {},
+      };
+    },
+  });
+
+  // ---------------------------------------------------------------------------
+  // Tool: cmux_read_screen
+  // ---------------------------------------------------------------------------
+
+  pi.registerTool({
+    name: "cmux_read_screen",
+    label: "cmux Read Screen",
+    description:
+      "Read terminal text from a cmux surface. Returns the visible viewport by default, or include scrollback history.",
+    promptSnippet: "Read terminal output from a cmux surface (visible or scrollback)",
+    parameters: Type.Object({
+      surface: Type.String({ description: "Target surface ref (e.g. 'surface:3')" }),
+      lines: Type.Optional(
+        Type.Number({ description: "Limit to the last N lines (implies scrollback)" })
+      ),
+      scrollback: Type.Optional(
+        Type.Boolean({ description: "Include scrollback history, not just visible viewport" })
+      ),
+    }),
+    async execute(_toolCallId, params, signal) {
+      const args = ["read-screen", "--surface", params.surface];
+      if (params.lines) {
+        args.push("--lines", String(params.lines));
+      } else if (params.scrollback) {
+        args.push("--scrollback");
+      }
+      const output = await cmux(args, signal);
+      return {
+        content: [{ type: "text", text: output || "(empty)" }],
+        details: {},
+      };
+    },
+  });
+
+  // ---------------------------------------------------------------------------
+  // Tool: cmux_send
+  // ---------------------------------------------------------------------------
+
+  pi.registerTool({
+    name: "cmux_send",
+    label: "cmux Send",
+    description:
+      "Send text to a cmux terminal surface. The text is typed literally. Use cmux_send_key to press Enter or other special keys afterwards.",
+    promptSnippet: "Send text to a cmux terminal surface",
+    parameters: Type.Object({
+      surface: Type.String({ description: "Target surface ref (e.g. 'surface:3')" }),
+      text: Type.String({ description: "Text to send (typed literally into the terminal)" }),
+    }),
+    async execute(_toolCallId, params, signal) {
+      await cmux(["send", "--surface", params.surface, "--", params.text], signal);
+      return {
+        content: [{ type: "text", text: `Sent to ${params.surface}` }],
+        details: { surface: params.surface },
+      };
+    },
+  });
+
+  // ---------------------------------------------------------------------------
+  // Tool: cmux_send_key
+  // ---------------------------------------------------------------------------
+
+  pi.registerTool({
+    name: "cmux_send_key",
+    label: "cmux Send Key",
+    description:
+      "Send a special key to a cmux terminal surface. Common keys: 'enter' (Return), 'ctrl+c' (interrupt), 'ctrl+d' (EOF), 'escape', 'tab', 'up', 'down'.",
+    promptSnippet: "Send a special key (enter, ctrl+c, etc.) to a cmux terminal surface",
+    parameters: Type.Object({
+      surface: Type.String({ description: "Target surface ref (e.g. 'surface:3')" }),
+      key: Type.String({ description: "Key to send (e.g. 'enter', 'ctrl+c', 'escape', 'tab', 'up', 'down')" }),
+    }),
+    async execute(_toolCallId, params, signal) {
+      await cmux(["send-key", "--surface", params.surface, "--", params.key], signal);
+      return {
+        content: [{ type: "text", text: `Sent key '${params.key}' to ${params.surface}` }],
+        details: { surface: params.surface, key: params.key },
+      };
+    },
+  });
+
+  // ---------------------------------------------------------------------------
+  // Tool: cmux_exec
+  // ---------------------------------------------------------------------------
+
+  pi.registerTool({
+    name: "cmux_exec",
+    label: "cmux Exec",
+    description:
+      "Send a command to a cmux terminal surface and press Enter. Convenience wrapper around cmux_send + cmux_send_key enter.",
+    promptSnippet: "Run a command in a cmux terminal surface (send text + Enter)",
+    parameters: Type.Object({
+      surface: Type.String({ description: "Target surface ref (e.g. 'surface:3')" }),
+      command: Type.String({ description: "Command to execute" }),
+    }),
+    async execute(_toolCallId, params, signal) {
+      await cmux(["send", "--surface", params.surface, "--", params.command + "\n"], signal);
+      return {
+        content: [{ type: "text", text: `Executed on ${params.surface}: ${params.command}` }],
+        details: { surface: params.surface, command: params.command },
+      };
+    },
+  });
+
+  // ---------------------------------------------------------------------------
+  // Tool: cmux_new_split
+  // ---------------------------------------------------------------------------
+
+  pi.registerTool({
+    name: "cmux_new_split",
+    label: "cmux New Split",
+    description:
+      "Create a new pane by splitting the current pane. Returns the new surface ref. Use cmux_exec to run a command in the new pane.",
+    promptSnippet: "Split a cmux pane to create a new terminal surface",
+    parameters: Type.Object({
+      direction: StringEnum(["right", "down", "left", "up"] as const, {
+        description: "Split direction relative to current pane",
+      }),
+    }),
+    async execute(_toolCallId, params, signal) {
+      const output = await cmux(["new-split", params.direction], signal);
+      return {
+        content: [{ type: "text", text: output || `Split ${params.direction}` }],
+        details: { direction: params.direction },
       };
     },
   });
