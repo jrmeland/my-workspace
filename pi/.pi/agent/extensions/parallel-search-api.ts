@@ -59,6 +59,7 @@ function buildRequestBody(params: Record<string, unknown>): Record<string, unkno
 }
 
 export default function parallelSearchApiExtension(pi: ExtensionAPI) {
+  (globalThis as any).__piProfiler?.begin("parallel-search-api");
   pi.registerTool({
     name: "parallel_search_beta_search",
     label: "Parallel Search API (v1beta/search)",
@@ -159,4 +160,5 @@ export default function parallelSearchApiExtension(pi: ExtensionAPI) {
       };
     },
   });
+  (globalThis as any).__piProfiler?.end("parallel-search-api");
 }

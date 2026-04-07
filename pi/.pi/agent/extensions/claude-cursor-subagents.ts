@@ -350,6 +350,7 @@ async function runSubagent(
 }
 
 export default function (pi: ExtensionAPI) {
+  (globalThis as any).__piProfiler?.begin("claude-cursor-subagents");
   pi.registerCommand("subagents", {
     description: "List discovered subagents from nested .claude/.cursor directories",
     handler: async (_args, ctx) => {
@@ -469,4 +470,5 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
+  (globalThis as any).__piProfiler?.end("claude-cursor-subagents");
 }

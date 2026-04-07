@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 export default function clearSessionExtension(pi: ExtensionAPI) {
+  (globalThis as any).__piProfiler?.begin("clear-session");
   pi.registerCommand("clear", {
     description: "Start a fresh session with no conversation history",
     handler: async (_args, ctx) => {
@@ -15,4 +16,5 @@ export default function clearSessionExtension(pi: ExtensionAPI) {
       ctx.ui.notify("Started a fresh session (/clear)", "success");
     },
   });
+  (globalThis as any).__piProfiler?.end("clear-session");
 }

@@ -27,6 +27,7 @@ function getCmuxContext(): string {
 const SKILLS_DIR = resolve(__dirname, "..", "skills");
 
 export default function (pi: ExtensionAPI) {
+  (globalThis as any).__piProfiler?.begin("cmux");
   // Always register the skill directory so pi discovers it regardless of cmux
   pi.on("resources_discover", () => {
     const skillPaths = [SKILLS_DIR].filter((p) => existsSync(p));
@@ -405,4 +406,5 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
+  (globalThis as any).__piProfiler?.end("cmux");
 }

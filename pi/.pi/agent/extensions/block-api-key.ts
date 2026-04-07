@@ -10,6 +10,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
+  (globalThis as any).__piProfiler?.begin("block-api-key");
   // Strip the API key from the process environment immediately on load.
   // This runs before any provider request can use it.
   const hadKey = !!process.env.ANTHROPIC_API_KEY;
@@ -43,4 +44,5 @@ export default function (pi: ExtensionAPI) {
       );
     }
   });
+  (globalThis as any).__piProfiler?.end("block-api-key");
 }

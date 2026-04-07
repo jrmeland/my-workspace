@@ -75,6 +75,7 @@ function discoverSkillPaths(rootCwd: string): string[] {
 }
 
 export default function (pi: ExtensionAPI) {
+  (globalThis as any).__piProfiler?.begin("claude-cursor-skills");
   pi.on("resources_discover", (event, ctx) => {
     const skillPaths = discoverSkillPaths(event.cwd);
 
@@ -84,4 +85,5 @@ export default function (pi: ExtensionAPI) {
 
     return { skillPaths };
   });
+  (globalThis as any).__piProfiler?.end("claude-cursor-skills");
 }

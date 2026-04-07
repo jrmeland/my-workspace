@@ -5,15 +5,27 @@
  * Times each phase: process bootstrap, extension loading, session resolution,
  * and MCP server connections (streamed live as each server responds).
  *
- * Naming: starts with _ so it loads first alphabetically, capturing maximum time.
+ * ## Per-extension timing
  *
+ * Other extensions can opt in to per-extension timing by adding two lines:
+ *
+ *   export default function (pi: ExtensionAPI) {
+ *     (globalThis as any).__piProfiler?.begin("my-extension");
+ *     // ... extension body ...
+ *     (globalThis as any).__piProfiler?.end("my-extension");
+ *   }
+ *
+ * The profiler will display per-extension timing in the startup widget.
+ * If the profiler isn't loaded, the calls are no-ops (optional chaining).
+ *
+ * Naming: starts with _ so it loads first alphabetically.
  * Auto-hides on first prompt. Toggle with /startup.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { spawn } from "node:child_process";
-import { readdirSync, statSync, readlinkSync, realpathSync } from "node:fs";
-import { join, basename, dirname } from "node:path";
+import { readdirSync, statSync } from "node:fs";
+import { join, basename } from "node:path";
 import { homedir } from "node:os";
 
 // ─── Timing state ────────────────────────────────────────────────────────────
@@ -26,10 +38,29 @@ interface TimingEntry {
   indent?: number;
 }
 
+interface ProfilerMark {
+  start: number;
+  end?: number;
+}
+
 const processStartMs = Date.now() - process.uptime() * 1000;
 const factoryRunMs = Date.now();
 
-// ─── Extension discovery (run at factory time, before other extensions load) ──
+// ─── Install global profiler API (before any other extension loads) ──────────
+
+const profilerMarks = new Map<string, ProfilerMark>();
+
+(globalThis as any).__piProfiler = {
+  begin(name: string) {
+    profilerMarks.set(name, { start: Date.now() });
+  },
+  end(name: string) {
+    const m = profilerMarks.get(name);
+    if (m) m.end = Date.now();
+  },
+};
+
+// ─── Extension discovery (at factory time) ───────────────────────────────────
 
 interface ExtInfo {
   name: string;
@@ -46,24 +77,20 @@ function discoverExtensions(): ExtInfo[] {
       try {
         const st = statSync(fullPath);
         if (st.isFile() && entry.endsWith(".ts")) {
-          // Skip ourselves
           if (entry === basename(__filename)) continue;
           results.push({ name: entry.replace(/\.ts$/, ""), sizeKB: Math.round(st.size / 1024) });
         } else if (st.isDirectory()) {
-          const indexPath = join(fullPath, "index.ts");
           try {
-            const idxSt = statSync(indexPath);
-            // Sum all .ts files in the directory for total size
             let totalSize = 0;
             for (const f of readdirSync(fullPath)) {
               if (f.endsWith(".ts")) {
                 try { totalSize += statSync(join(fullPath, f)).size; } catch {}
               }
             }
-            results.push({ name: entry, sizeKB: Math.round(totalSize / 1024) });
-          } catch {
-            // No index.ts, skip
-          }
+            if (totalSize > 0) {
+              results.push({ name: entry, sizeKB: Math.round(totalSize / 1024) });
+            }
+          } catch {}
         }
       } catch {}
     }
@@ -73,7 +100,6 @@ function discoverExtensions(): ExtInfo[] {
 }
 
 const extensions = discoverExtensions();
-
 
 // ─── Rendering helpers ───────────────────────────────────────────────────────
 
@@ -105,22 +131,17 @@ export default function (pi: ExtensionAPI) {
   let widgetVisible = true;
   let uiCtx: any = null;
 
-  // Phase 1: Process start → our factory = Node.js + pi core + jiti setup
-  const bootstrapMs = factoryRunMs - processStartMs;
+  // Phase 1: Process start → our factory
   timings.push({
     label: "Process bootstrap",
-    durationMs: bootstrapMs,
+    durationMs: factoryRunMs - processStartMs,
     status: "done",
-
   });
-
-  // Phase 2: Our factory → session_start = other extensions loading + session
-  // (filled in on session_start)
 
   function updateWidget() {
     if (!uiCtx || !widgetVisible) return;
 
-    // Scale bars: use p90 of non-info entries so outliers don't crush everything
+    // Scale bars: p90 of timed entries (exclude info-only and aggregate MCP)
     const durations = timings
       .filter((t) => t.status !== "info" && t.durationMs > 0 && t.label !== "MCP servers")
       .map((t) => t.durationMs)
@@ -136,7 +157,6 @@ export default function (pi: ExtensionAPI) {
         const barW = Math.min(20, Math.max(8, width - 50));
         const lines: string[] = [];
 
-        // Header
         lines.push(
           theme.fg("dim", "  ┌─ ") +
           theme.fg("accent", theme.bold("Startup Profile")) +
@@ -174,7 +194,6 @@ export default function (pi: ExtensionAPI) {
           );
         }
 
-        // Footer
         const totalStr = fmtMs(totalElapsed);
         const footer = allDone
           ? theme.fg("success", `Ready — ${totalStr} total`)
@@ -212,11 +231,11 @@ export default function (pi: ExtensionAPI) {
       child.stderr.on("data", () => {});
 
       child.on("error", () => {
-        const idx = timings.findIndex((t) => t.label === "MCP servers");
-        if (idx >= 0) {
-          timings[idx].status = "error";
-          timings[idx].detail = "mcporter not found";
-          timings[idx].durationMs = Date.now() - mcpStartMs;
+        const mcpEntry = timings.find((t) => t.label === "MCP servers");
+        if (mcpEntry) {
+          mcpEntry.status = "error";
+          mcpEntry.detail = "mcporter not found";
+          mcpEntry.durationMs = Date.now() - mcpStartMs;
         }
         updateWidget();
         resolve();
@@ -249,11 +268,9 @@ export default function (pi: ExtensionAPI) {
         let detail = "";
 
         if (info.includes("offline")) {
-          status = "error";
-          detail = "offline";
+          status = "error"; detail = "offline";
         } else if (info.includes("auth required")) {
-          status = "warn";
-          detail = "needs auth";
+          status = "warn"; detail = "needs auth";
         } else {
           const toolMatch = info.match(/(\d+) tools?/);
           if (toolMatch) detail = `${toolMatch[1]} tools`;
@@ -270,38 +287,79 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     uiCtx = ctx;
     const sessionReadyMs = Date.now();
-    // Phase 2: Extension loading + session resolution
+
+    // Phase 2: Extensions + session
     const extLoadMs = sessionReadyMs - factoryRunMs;
+
+    // Check for per-extension profiler marks
+    const markedExts: { name: string; ms: number }[] = [];
+    let unmarkedMs = extLoadMs;
+
+    for (const [name, mark] of profilerMarks) {
+      if (mark.end) {
+        const ms = mark.end - mark.start;
+        markedExts.push({ name, ms });
+        unmarkedMs -= ms;
+      }
+    }
+    markedExts.sort((a, b) => b.ms - a.ms);
+
+    const markedCount = markedExts.length;
+    const totalExts = extensions.length;
+
     timings.push({
       label: "Extensions + session",
       durationMs: extLoadMs,
       status: "done",
-      detail: `${extensions.length} extensions`,
+      detail: `${totalExts} extensions`,
     });
 
-    // Show individual extensions by size (as proxy for compile time)
-    for (const ext of extensions.slice(0, 8)) {
-      timings.push({
-        label: ext.name,
-        durationMs: 0,
-        status: "info",
-        detail: `${ext.sizeKB}KB`,
-        indent: 1,
-      });
-    }
-    if (extensions.length > 8) {
-      timings.push({
-        label: `+${extensions.length - 8} more`,
-        durationMs: 0,
-        status: "info",
-        indent: 1,
-      });
+    if (markedExts.length > 0) {
+      // Show timed extensions
+      for (const ext of markedExts) {
+        timings.push({
+          label: ext.name,
+          durationMs: ext.ms,
+          status: "done",
+          indent: 1,
+        });
+      }
+
+      // Show remaining time as "other" if there are untimed extensions
+      const untimedCount = totalExts - markedCount;
+      if (untimedCount > 0 && unmarkedMs > 1) {
+        timings.push({
+          label: `${untimedCount} untimed`,
+          durationMs: Math.max(0, unmarkedMs),
+          status: "info",
+          detail: "add __piProfiler",
+          indent: 1,
+        });
+      }
+    } else {
+      // No marks — show extensions by size as a proxy
+      for (const ext of extensions.slice(0, 8)) {
+        timings.push({
+          label: ext.name,
+          durationMs: 0,
+          status: "info",
+          detail: `${ext.sizeKB}KB`,
+          indent: 1,
+        });
+      }
+      if (extensions.length > 8) {
+        timings.push({
+          label: `+${extensions.length - 8} more`,
+          durationMs: 0,
+          status: "info",
+          indent: 1,
+        });
+      }
     }
 
-    // Show initial widget
     updateWidget();
 
-    // Phase 3: MCP server probing
+    // Phase 3: MCP servers
     const mcpStartMs = Date.now();
     timings.push({
       label: "MCP servers",

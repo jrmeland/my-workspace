@@ -51,6 +51,7 @@ interface TicketState {
 }
 
 export default function linearTicketExtension(pi: ExtensionAPI) {
+  (globalThis as any).__piProfiler?.begin("linear-ticket");
 	let state: TicketState | null = null;
 
 	// --- helpers ---
@@ -313,4 +314,5 @@ export default function linearTicketExtension(pi: ExtensionAPI) {
 			}
 		},
 	});
+  (globalThis as any).__piProfiler?.end("linear-ticket");
 }

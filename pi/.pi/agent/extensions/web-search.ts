@@ -31,6 +31,7 @@ interface ParallelResponse {
 }
 
 export default function (pi: ExtensionAPI) {
+  (globalThis as any).__piProfiler?.begin("web-search");
 	pi.registerTool({
 		name: "web_search",
 		label: "Web Search",
@@ -195,4 +196,5 @@ export default function (pi: ExtensionAPI) {
 			return new Text(text, 0, 0);
 		},
 	});
+  (globalThis as any).__piProfiler?.end("web-search");
 }

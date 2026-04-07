@@ -422,6 +422,7 @@ class ContextView implements Component {
 }
 
 export default function contextExtension(pi: ExtensionAPI) {
+  (globalThis as any).__piProfiler?.begin("context");
 	// Track which skills were actually pulled in via read tool calls.
 	let lastSessionId: string | null = null;
 	let cachedLoadedSkills = new Set<string>();
@@ -575,4 +576,5 @@ export default function contextExtension(pi: ExtensionAPI) {
 			});
 		},
 	});
+  (globalThis as any).__piProfiler?.end("context");
 }

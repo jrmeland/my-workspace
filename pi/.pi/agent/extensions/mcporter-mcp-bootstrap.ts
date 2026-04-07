@@ -255,6 +255,7 @@ function buildCallInstructionMarkdown(serverName: string, tool: McporterSchemaTo
 }
 
 export default function mcporterMcpBootstrap(pi: ExtensionAPI) {
+  (globalThis as any).__piProfiler?.begin("mcporter-mcp-bootstrap");
   const registeredToolNames = new Set<string>();
   const authCheckedThisSession = new Set<string>();
   const discoveredServers = new Map<string, McporterServer>();
@@ -584,4 +585,5 @@ export default function mcporterMcpBootstrap(pi: ExtensionAPI) {
     authCheckedThisSession.clear();
     await runMcpRefresh(ctx, "startup");
   });
+  (globalThis as any).__piProfiler?.end("mcporter-mcp-bootstrap");
 }

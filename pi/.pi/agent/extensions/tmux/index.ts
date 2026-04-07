@@ -257,6 +257,7 @@ const TmuxSelectParams = Type.Object({
 // ─── Extension ────────────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
+  (globalThis as any).__piProfiler?.begin("tmux");
 	pi.registerFlag("tmux-ssh", {
 		description: "Route tmux commands through SSH (e.g. user@host)",
 		type: "string",
@@ -896,4 +897,5 @@ For long-running processes, start them in tmux and use tmux_read periodically to
 
 		return { systemPrompt: event.systemPrompt + extra };
 	});
+  (globalThis as any).__piProfiler?.end("tmux");
 }

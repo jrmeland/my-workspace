@@ -75,6 +75,7 @@ function discoverCommandPaths(rootCwd: string): string[] {
 }
 
 export default function (pi: ExtensionAPI) {
+  (globalThis as any).__piProfiler?.begin("claude-cursor-commands");
   pi.on("resources_discover", (event, ctx) => {
     const promptPaths = discoverCommandPaths(event.cwd);
 
@@ -84,4 +85,5 @@ export default function (pi: ExtensionAPI) {
 
     return { promptPaths };
   });
+  (globalThis as any).__piProfiler?.end("claude-cursor-commands");
 }

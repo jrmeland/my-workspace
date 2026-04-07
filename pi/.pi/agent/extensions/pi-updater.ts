@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 export default function (pi: ExtensionAPI) {
+  (globalThis as any).__piProfiler?.begin("pi-updater");
   const packageName = "@mariozechner/pi-coding-agent";
 
   async function getVersionInfo() {
@@ -73,4 +74,5 @@ export default function (pi: ExtensionAPI) {
       await performUpdate(ctx);
     },
   });
+  (globalThis as any).__piProfiler?.end("pi-updater");
 }
