@@ -69,6 +69,7 @@
     "githubPullRequests.fileListLayout": "flat",
     "githubPullRequests.terminalLinksHandler": "github",
     "remote.SSH.remotePlatform": {
-        "mithril": "linux"
+        "mithril": "linux",
+        "shire": "macOS"
     }
 }
