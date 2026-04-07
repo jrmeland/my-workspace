@@ -17,7 +17,7 @@
  *
  * What gets proxied:
  *   - read, write, edit, bash → all execute on remote via SSH
- *   - grep, find, ls → disabled in remote mode (use bash with rg/find/ls instead)
+ *   - grep, find, ls → execute on remote via SSH
  *   - user ! commands → execute on remote
  *
  * What stays local:
@@ -33,7 +33,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -42,10 +42,15 @@ import {
 	type ReadOperations,
 	type WriteOperations,
 	type EditOperations,
+	type FindOperations,
+	type LsOperations,
 	createBashTool,
 	createEditTool,
 	createReadTool,
 	createWriteTool,
+	createGrepTool,
+	createFindTool,
+	createLsTool,
 } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
@@ -197,35 +202,115 @@ function createRemoteBashOps(cfg: RemoteConfig, localCwd: string): BashOperation
 				const remoteCwd = toRemote(cwd);
 				const cmd = `cd ${shellQuote(remoteCwd)} && ${command}`;
 				const args = [...sshOpts(cfg), cfg.remote, cmd];
-				const child = spawn("ssh", args, { stdio: ["ignore", "pipe", "pipe"] });
+				const child = spawn("ssh", args, {
+					stdio: ["ignore", "pipe", "pipe"],
+					detached: true,
+				});
 
 				let timedOut = false;
+				let killTimer: ReturnType<typeof setTimeout> | undefined;
+
+				// Kill SSH process group, escalating to SIGKILL after a grace period.
+				// With detached: true, the SSH child is a process group leader,
+				// so -pid kills the entire group (matching local bash behavior).
+				const forceKill = () => {
+					try {
+						if (child.pid) process.kill(-child.pid, "SIGTERM");
+					} catch {
+						try { child.kill("SIGTERM"); } catch {}
+					}
+					killTimer = setTimeout(() => {
+						try {
+							if (child.pid) process.kill(-child.pid, "SIGKILL");
+						} catch {
+							try { child.kill("SIGKILL"); } catch {}
+						}
+					}, 2000);
+				};
+
 				const timer = timeout
 					? setTimeout(() => {
 							timedOut = true;
-							child.kill();
+							forceKill();
 						}, timeout * 1000)
 					: undefined;
 
 				child.stdout.on("data", onData);
 				child.stderr.on("data", onData);
 
+				const onAbort = () => forceKill();
+				if (signal) {
+					if (signal.aborted) onAbort();
+					else signal.addEventListener("abort", onAbort, { once: true });
+				}
+
 				child.on("error", (e) => {
 					if (timer) clearTimeout(timer);
+					if (killTimer) clearTimeout(killTimer);
 					reject(e);
 				});
 
-				const onAbort = () => child.kill();
-				signal?.addEventListener("abort", onAbort, { once: true });
-
 				child.on("close", (code) => {
 					if (timer) clearTimeout(timer);
+					if (killTimer) clearTimeout(killTimer);
 					signal?.removeEventListener("abort", onAbort);
 					if (signal?.aborted) reject(new Error("aborted"));
 					else if (timedOut) reject(new Error(`timeout:${timeout}`));
 					else resolve({ exitCode: code });
 				});
 			}),
+	};
+}
+
+// Note: grep spawns ripgrep locally, so GrepOperations alone won't work.
+// Instead we override the full grep tool execute() to run rg on the remote via SSH.
+// See the grep override in the extension body below.
+
+function createRemoteFindOps(cfg: RemoteConfig, localCwd: string): FindOperations {
+	const toRemote = createPathMapper(localCwd, cfg.remoteCwd);
+	return {
+		exists: async (p) => {
+			try {
+				await sshExec(cfg, `test -e ${shellQuote(toRemote(p))}`);
+				return true;
+			} catch {
+				return false;
+			}
+		},
+		glob: async (pattern, cwd, options) => {
+			const remoteCwd = toRemote(cwd);
+			const ignoreArgs = options.ignore.map(i => `--exclude ${shellQuote(i)}`).join(" ");
+			const cmd = `cd ${shellQuote(remoteCwd)} && find . -name ${shellQuote(pattern)} ${ignoreArgs} -maxdepth 20 2>/dev/null | head -n ${options.limit}`;
+			try {
+				const result = await sshExec(cfg, cmd);
+				return result.toString().trim().split("\n").filter(Boolean);
+			} catch {
+				return [];
+			}
+		},
+	};
+}
+
+function createRemoteLsOps(cfg: RemoteConfig, localCwd: string): LsOperations {
+	const toRemote = createPathMapper(localCwd, cfg.remoteCwd);
+	return {
+		exists: async (p) => {
+			try {
+				await sshExec(cfg, `test -e ${shellQuote(toRemote(p))}`);
+				return true;
+			} catch {
+				return false;
+			}
+		},
+		stat: async (p) => {
+			const result = await sshExec(cfg, `test -d ${shellQuote(toRemote(p))} && echo d || echo f`);
+			const isDir = result.toString().trim() === "d";
+			return { isDirectory: () => isDir };
+		},
+		readdir: async (p) => {
+			const result = await sshExec(cfg, `ls -1 ${shellQuote(toRemote(p))}`);
+			return result.toString().trim().split("\n").filter(Boolean);
+		},
 	};
 }
 
@@ -243,16 +328,44 @@ function loadHostsConfig(): Record<string, HostEntry> {
 	return {};
 }
 
-function parseRemoteArg(arg: string): { remote: string; remoteCwd?: string } {
+// ─── Last Workspace Persistence ──────────────────────────────────────────────
+
+const LAST_WORKSPACE_PATH = join(homedir(), ".pi/agent/extensions/remote-workspace/last-workspace.json");
+
+function loadLastWorkspaces(): Record<string, string> {
+	if (existsSync(LAST_WORKSPACE_PATH)) {
+		try {
+			return JSON.parse(readFileSync(LAST_WORKSPACE_PATH, "utf8"));
+		} catch {
+			return {};
+		}
+	}
+	return {};
+}
+
+function saveLastWorkspace(alias: string, remoteCwd: string): void {
+	const data = loadLastWorkspaces();
+	data[alias] = remoteCwd;
+	try {
+		writeFileSync(LAST_WORKSPACE_PATH, JSON.stringify(data, null, 2) + "\n", "utf8");
+	} catch { /* ignore write errors */ }
+}
+
+function parseRemoteArg(arg: string): { remote: string; remoteCwd?: string; alias?: string } {
 	// Check saved hosts first
 	const hosts = loadHostsConfig();
 	if (hosts[arg]) {
 		const h = hosts[arg];
 		const remote = h.user ? `${h.user}@${h.host}` : h.host;
-		return { remote, remoteCwd: h.path };
+
+		// Use last-workspace path if available, otherwise fall back to hosts.json default
+		const lastWorkspaces = loadLastWorkspaces();
+		const remoteCwd = lastWorkspaces[arg] ?? h.path;
+
+		return { remote, remoteCwd, alias: arg };
 	}
 
-	// Parse user@host:/path
+	// Parse user@host:/path — explicit path, no alias lookup
 	if (arg.includes(":")) {
 		const idx = arg.indexOf(":");
 		return { remote: arg.slice(0, idx), remoteCwd: arg.slice(idx + 1) };
@@ -265,6 +378,7 @@ function parseRemoteArg(arg: string): { remote: string; remoteCwd?: string } {
 // ─── Extension ──────────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
+	(globalThis as any).__piProfiler?.begin("remote-workspace");
 	pi.registerFlag("remote", {
 		description: "Remote workspace: user@host:/path, user@host, or alias from hosts.json",
 		type: "string",
@@ -277,9 +391,13 @@ export default function (pi: ExtensionAPI) {
 	const localWrite = createWriteTool(localCwd);
 	const localEdit = createEditTool(localCwd);
 	const localBash = createBashTool(localCwd);
+	const localGrep = createGrepTool(localCwd);
+	const localFind = createFindTool(localCwd);
+	const localLs = createLsTool(localCwd);
 
 	// Resolved on session_start when --remote is provided
 	let remoteCfg: RemoteConfig | null = null;
+	let currentAlias: string | null = null; // host alias used at startup (for last-workspace persistence)
 	const getRemote = () => remoteCfg;
 
 	// Handoff state
@@ -293,6 +411,22 @@ export default function (pi: ExtensionAPI) {
 	let lastHealthCheck = 0;
 	const HEALTH_CHECK_INTERVAL_MS = 30_000; // recheck every 30s at most
 	let uiCtx: any = null; // stash ctx from session_start for status updates
+
+	// ── Remote command UI feedback ──────────────────────────────────────
+
+	let activeRemoteCommands = 0;
+
+	function updateRemoteCommandStatus(command?: string, cancelling?: boolean) {
+		if (!uiCtx?.ui) return;
+		if (cancelling) {
+			uiCtx.ui.setStatus("remote-cmd", uiCtx.ui.theme.fg("warning", "⏹ Cancelling remote command…"));
+		} else if (activeRemoteCommands > 0 && command) {
+			const shortCmd = command.length > 60 ? command.slice(0, 57) + "…" : command;
+			uiCtx.ui.setStatus("remote-cmd", uiCtx.ui.theme.fg("muted", `⚡ ${shortCmd}`));
+		} else if (activeRemoteCommands <= 0) {
+			uiCtx.ui.setStatus("remote-cmd", undefined);
+		}
+	}
 
 	async function ensureConnected(): Promise<void> {
 		const cfg = getRemote();
@@ -414,12 +548,103 @@ export default function (pi: ExtensionAPI) {
 			const cfg = getRemote();
 			if (cfg) {
 				await ensureConnected();
-				const tool = createBashTool(localCwd, {
-					operations: createRemoteBashOps(cfg, localCwd),
+
+				// Track active commands and show status in the footer
+				activeRemoteCommands++;
+				updateRemoteCommandStatus(params.command);
+				const onAbortStatus = () => updateRemoteCommandStatus(undefined, true);
+				signal?.addEventListener("abort", onAbortStatus, { once: true });
+
+				try {
+					const tool = createBashTool(localCwd, {
+						operations: createRemoteBashOps(cfg, localCwd),
+					});
+					return await tool.execute(id, params, signal, onUpdate);
+				} finally {
+					signal?.removeEventListener("abort", onAbortStatus);
+					activeRemoteCommands = Math.max(0, activeRemoteCommands - 1);
+					updateRemoteCommandStatus();
+				}
+			}
+			return localBash.execute(id, params, signal, onUpdate);
+		},
+	});
+
+	// ── Override grep ──────────────────────────────────────────────────────────
+	// Grep spawns ripgrep locally, so we can't just swap operations.
+	// Instead we run `rg` on the remote machine via SSH and return the output.
+
+	pi.registerTool({
+		...localGrep,
+		async execute(id, params, signal, onUpdate) {
+			const cfg = getRemote();
+			if (!cfg) return localGrep.execute(id, params, signal, onUpdate);
+
+			await ensureConnected();
+			const toRemote = createPathMapper(localCwd, cfg.remoteCwd);
+			const searchPath = params.path
+				? toRemote(params.path.startsWith("/") ? params.path : join(localCwd, params.path))
+				: cfg.remoteCwd;
+
+			const args: string[] = ["rg", "--line-number", "--color=never", "--hidden"];
+			if (params.ignoreCase) args.push("-i");
+			if (params.literal) args.push("--fixed-strings");
+			if (params.context && params.context > 0) args.push(`-C${params.context}`);
+			if (params.glob) args.push("--glob", shellQuote(params.glob));
+			const limit = params.limit ?? 100;
+			args.push("-m", String(limit));
+			args.push("--", shellQuote(params.pattern), shellQuote(searchPath));
+
+			try {
+				const result = await sshExec(cfg, args.join(" "));
+				const output = result.toString("utf-8").trim();
+				return {
+					content: [{ type: "text" as const, text: output || "No matches found" }],
+					details: undefined,
+				};
+			} catch (err: any) {
+				// rg exits 1 for no matches, 2 for errors
+				const stderr = err.message || "";
+				if (stderr.includes("No such file")) throw new Error(`Path not found: ${searchPath}`);
+				return {
+					content: [{ type: "text" as const, text: "No matches found" }],
+					details: undefined,
+				};
+			}
+		},
+	});
+
+	// ── Override find ──────────────────────────────────────────────────────────
+
+	pi.registerTool({
+		...localFind,
+		async execute(id, params, signal, onUpdate) {
+			const cfg = getRemote();
+			if (cfg) {
+				await ensureConnected();
+				const tool = createFindTool(localCwd, {
+					operations: createRemoteFindOps(cfg, localCwd),
 				});
 				return tool.execute(id, params, signal, onUpdate);
 			}
-			return localBash.execute(id, params, signal, onUpdate);
+			return localFind.execute(id, params, signal, onUpdate);
+		},
+	});
+
+	// ── Override ls ────────────────────────────────────────────────────────────
+
+	pi.registerTool({
+		...localLs,
+		async execute(id, params, signal, onUpdate) {
+			const cfg = getRemote();
+			if (cfg) {
+				await ensureConnected();
+				const tool = createLsTool(localCwd, {
+					operations: createRemoteLsOps(cfg, localCwd),
+				});
+				return tool.execute(id, params, signal, onUpdate);
+			}
+			return localLs.execute(id, params, signal, onUpdate);
 		},
 	});
 
@@ -437,7 +662,8 @@ export default function (pi: ExtensionAPI) {
 		const arg = pi.getFlag("remote") as string | undefined;
 		if (!arg) return;
 
-		const { remote, remoteCwd: rawCwd } = parseRemoteArg(arg);
+		const { remote, remoteCwd: rawCwd, alias } = parseRemoteArg(arg);
+		currentAlias = alias ?? null;
 		const controlPath = join(tmpdir(), `pi-remote-${remote.replace(/[^a-zA-Z0-9]/g, "-")}`);
 
 		// Temporary config for initial connection
@@ -462,11 +688,11 @@ export default function (pi: ExtensionAPI) {
 			connectionHealthy = true;
 			lastHealthCheck = Date.now();
 
-			// Disable local-only tools that would search the wrong filesystem.
-			// The agent should use bash (which is remoted) for grep/find/ls.
-			const all = pi.getAllTools().map((t) => t.name);
-			const localOnly = new Set(["grep", "find", "ls"]);
-			pi.setActiveTools(all.filter((n) => !localOnly.has(n)));
+			// Persist the resolved workspace for this alias
+			if (currentAlias) {
+				saveLastWorkspace(currentAlias, resolvedCwd);
+			}
+
 
 			const label = `🔗 ${remote}:${resolvedCwd}`;
 			ctx.ui.setStatus("remote", ctx.ui.theme.fg("accent", label));
@@ -494,20 +720,45 @@ export default function (pi: ExtensionAPI) {
 		// Add remote workspace guidance
 		prompt += "\n\n# Remote Workspace\n";
 		prompt += `All file operations (read, write, edit) and bash commands execute on ${cfg.remote} at ${cfg.remoteCwd} via SSH.\n`;
-		prompt += "The built-in grep, find, and ls tools are DISABLED — use the bash tool with `rg`, `find`, or `ls` commands instead.\n";
+		prompt += "All tools (read, write, edit, bash, grep, find, ls) transparently execute on the remote machine.\n";
 		prompt += "\n";
 		prompt += "## CRITICAL: Local vs Remote Tool Split\n";
-		prompt += `- read, write, edit, bash → execute on REMOTE machine (${cfg.remote})\n`;
-		prompt += "- tmux_start, tmux_send, tmux_read, tmux_* → execute on LOCAL machine (NOT remote!)\n";
-		prompt += "- cmux tools (notifications, sidebar status, progress) → LOCAL\n";
 		prompt += "\n";
-		prompt += "**NEVER use tmux tools to run commands intended for the remote machine.** They will run locally instead.\n";
-		prompt += "For long-running remote processes (dev servers, test suites, docker, builds, log tailing):\n";
-		prompt += "  1. Use the remote_terminal tool — it creates a cmux pane auto-connected via mosh+tmux to the remote machine\n";
-		prompt += "  2. Then use cmux send/read-screen with the returned surface ref to interact\n";
-		prompt += "  3. These processes survive network disconnects (tmux persistence on remote)\n";
+		prompt += "| Tool | Runs on | Use for |\n";
+		prompt += "|------|---------|---------|\n";
+		prompt += `| read, write, edit, bash, grep, find, ls | REMOTE (${cfg.remote}) | All file and command work |\n`;
+		prompt += `| remote_terminal | REMOTE (${cfg.remote}) | Long-running processes: docker, dev servers, test suites, builds, log tailing |\n`;
+		prompt += "| cmux tools (notifications, status, progress) | LOCAL | Sidebar UI, notifications |\n";
+		prompt += "| cmux_tree, cmux_read_screen, cmux_send, cmux_exec, etc. | LOCAL | Pane management, reading output, running commands in other panes |\n";
+		prompt += "| mcp_call, mcp_list | LOCAL | MCP server interactions (Linear, Slack, etc.) |\n";
+		prompt += "| tmux_start, tmux_send, tmux_read, tmux_* | LOCAL | **Almost never needed** |\n";
 		prompt += "\n";
-		prompt += "For quick one-shot commands, the bash tool is fine (runs on remote, returns output).\n";
+		prompt += "### ⚠️ tmux runs LOCALLY — do NOT use it for remote work\n";
+		prompt += "\n";
+		prompt += "The tmux tools create sessions on THIS machine (the local Mac), not on the remote.\n";
+		prompt += "Commands like `make local-up`, `docker compose`, `poetry run pytest`, `git worktree add`\n";
+		prompt += "will silently run on the WRONG machine if you use tmux instead of remote_terminal or bash.\n";
+		prompt += "\n";
+		prompt += "### How to run long-running remote processes\n";
+		prompt += "\n";
+		prompt += "1. Use `remote_terminal` — it creates a cmux pane auto-connected via mosh+tmux to the remote machine\n";
+		prompt += "2. Then use `cmux send/read-screen` with the returned surface ref to interact\n";
+		prompt += "3. These processes survive network disconnects (tmux persistence on remote)\n";
+		prompt += "\n";
+		prompt += "### How to run quick one-shot remote commands\n";
+		prompt += "\n";
+		prompt += "Just use the `bash` tool — it runs on the remote machine and returns output.\n";
+		prompt += "\n";
+		prompt += "### When tmux IS appropriate\n";
+		prompt += "\n";
+		prompt += "Almost never. The cmux_* and mcp_* tools handle local operations.\n";
+		prompt += "If you catch yourself typing a remote path into tmux_send, STOP — use remote_terminal or bash instead.\n";
+		prompt += "\n";
+		prompt += "## Shell Environment\n";
+		prompt += "Every bash command automatically runs in the correct remote working directory — do NOT prefix commands with `cd`.\n";
+		prompt += "The remote shell sources ~/.zshenv which sets up PATH (brew, bun, nvm, dotnet, ~/.local/bin).\n";
+		prompt += "Do NOT prefix commands with `PATH=...` or `export PATH=...` — the environment is already configured.\n";
+		prompt += "Just run commands directly: `bun run lint`, `poetry run pytest`, `docker compose up`, etc.\n";
 
 		return { systemPrompt: prompt };
 	});
@@ -717,6 +968,17 @@ export default function (pi: ExtensionAPI) {
 				const resolvedCwd = (await sshExec(bootstrap, `cd ${shellQuote(expandedPath)} && pwd`)).toString().trim();
 
 				remoteCfg = { remote: newRemote, remoteCwd: resolvedCwd, controlPath };
+
+				// Update alias tracking: if switching to a named host, track that alias;
+				// if just switching paths on same host, keep the existing alias.
+				if (hosts[arg]) {
+					currentAlias = arg;
+				}
+
+				// Persist the new workspace path
+				if (currentAlias) {
+					saveLastWorkspace(currentAlias, resolvedCwd);
+				}
 
 				const label = `🔗 ${newRemote}:${resolvedCwd}`;
 				ctx.ui.setStatus("remote", ctx.ui.theme.fg("accent", label));
@@ -996,6 +1258,8 @@ export default function (pi: ExtensionAPI) {
 			}
 		},
 	});
+
+	(globalThis as any).__piProfiler?.end("remote-workspace");
 }
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
@@ -1015,3 +1279,5 @@ const LOCAL_ONLY_PREFIXES = [
 function isLocalOnlyPath(p: string): boolean {
 	return LOCAL_ONLY_PREFIXES.some((prefix) => p.startsWith(prefix));
 }
+
+
