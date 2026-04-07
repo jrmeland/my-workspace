@@ -8,6 +8,9 @@ elif [[ -f /home/linuxbrew/.linuxbrew/bin/brew ]]; then
   eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 fi
 
+# System paths (macOS /etc/paths entries — needed for non-login shells like SSH BatchMode)
+[[ -d /usr/local/bin ]] && export PATH="/usr/local/bin:$PATH"
+
 # Core paths
 export PATH="$HOME/.local/bin:$PATH"
 export PATH="$HOME/source/local_helpers:$PATH"
