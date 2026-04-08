@@ -86,10 +86,36 @@ export default function (pi: ExtensionAPI) {
     await cmux(["set-status", "pi", "Running", "--icon", "bolt.fill", "--color", "#10B981"]);
   });
 
-  pi.on("agent_end", async () => {
+  pi.on("agent_end", async (event) => {
     await cmux(["set-status", "pi", "Idle", "--icon", "pause.circle.fill", "--color", "#8E8E93"]);
     await cmux(["clear-progress"]);
-    await cmux(["notify", "--title", "π", "--body", "Ready for input"]);
+
+    // Build a contextual notification from the last assistant message
+    let body = "Ready for input";
+    if (event.messages?.length) {
+      // Walk backwards to find the last assistant text
+      for (let i = event.messages.length - 1; i >= 0; i--) {
+        const msg = event.messages[i];
+        if (msg.role === "assistant" && Array.isArray(msg.content)) {
+          const textBlock = msg.content.find(
+            (b: any) => b.type === "text" && b.text?.trim()
+          ) as { type: "text"; text: string } | undefined;
+          if (textBlock) {
+            // Take the first meaningful line, truncate for notification
+            const firstLine = textBlock.text
+              .split("\n")
+              .map((l: string) => l.trim())
+              .find((l: string) => l.length > 0 && !l.startsWith("#") && !l.startsWith("```"));
+            if (firstLine) {
+              body = firstLine.length > 120 ? firstLine.slice(0, 117) + "…" : firstLine;
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    await cmux(["notify", "--title", "π", "--body", body]);
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {

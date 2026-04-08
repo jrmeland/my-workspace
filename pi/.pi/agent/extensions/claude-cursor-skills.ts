@@ -5,6 +5,9 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 const TARGET_DIR_NAMES = new Set([".claude", ".cursor"]);
 const SKILL_SUBDIR_CANDIDATES = ["skills", "rules"];
 
+// Skills to exclude when running inside cmux (they conflict with cmux tools).
+const CMUX_EXCLUDED_SKILLS = new Set(["tmux"]);
+
 // Keep recursion practical in large monorepos.
 const SKIP_DIR_NAMES = new Set([
   ".git",
@@ -74,10 +77,40 @@ function discoverSkillPaths(rootCwd: string): string[] {
   return [...discovered];
 }
 
+/**
+ * When inside cmux, expand skill parent directories into individual skill
+ * subdirectories, filtering out any that conflict with cmux (e.g. tmux).
+ * When NOT in cmux, return the paths as-is (no filtering needed).
+ */
+function filterForCmux(parentPaths: string[]): string[] {
+  if (!process.env.CMUX_WORKSPACE_ID) return parentPaths;
+
+  const filtered: string[] = [];
+
+  for (const parentPath of parentPaths) {
+    let entries: ReturnType<typeof readdirSync>;
+    try {
+      entries = readdirSync(parentPath, { withFileTypes: true });
+    } catch {
+      filtered.push(parentPath);
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (CMUX_EXCLUDED_SKILLS.has(entry.name)) continue;
+      filtered.push(join(parentPath, entry.name));
+    }
+  }
+
+  return filtered;
+}
+
 export default function (pi: ExtensionAPI) {
   (globalThis as any).__piProfiler?.begin("claude-cursor-skills");
   pi.on("resources_discover", (event, ctx) => {
-    const skillPaths = discoverSkillPaths(event.cwd);
+    const rawPaths = discoverSkillPaths(event.cwd);
+    const skillPaths = filterForCmux(rawPaths);
 
     if (skillPaths.length > 0) {
       ctx.ui.notify(`claude-cursor-skills: discovered ${skillPaths.length} skill path(s)`, "info");

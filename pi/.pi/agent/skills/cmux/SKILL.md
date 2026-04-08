@@ -69,15 +69,18 @@ cmux new-surface --pane pane:1
 
 ### Send Commands to Other Panes
 
-```bash
-# Send text to a surface (does NOT press Enter)
-cmux send --surface surface:3 "npm run dev"
+**IMPORTANT:** The cmux CLI uses **positional arguments** for text. Do NOT use `--text` or `--enter` flags — those are pi tool parameter names, not cmux CLI flags. Using them will send literal garbage into the shell.
 
-# Press Enter to execute
+```bash
+# ✅ CORRECT — text is a positional argument, Enter is a separate send-key call
+cmux send --surface surface:3 "npm run dev"
 cmux send-key --surface surface:3 "Return"
 
-# Combined: send command + enter
+# ✅ CORRECT — combined on one line
 cmux send --surface surface:3 "npm run dev" && cmux send-key --surface surface:3 "Return"
+
+# ❌ WRONG — --text and --enter are NOT cmux CLI flags
+# cmux send --surface surface:3 --text "npm run dev" --enter
 ```
 
 ### Read Output from Other Panes

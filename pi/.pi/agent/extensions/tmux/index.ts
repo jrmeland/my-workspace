@@ -258,6 +258,10 @@ const TmuxSelectParams = Type.Object({
 
 export default function (pi: ExtensionAPI) {
   (globalThis as any).__piProfiler?.begin("tmux");
+	// When running inside cmux, the cmux extension handles terminal multiplexing.
+	// Skip all tmux tools and prompt injection to avoid confusing the model.
+	if (process.env.CMUX_WORKSPACE_ID) return;
+
 	pi.registerFlag("tmux-ssh", {
 		description: "Route tmux commands through SSH (e.g. user@host)",
 		type: "string",
