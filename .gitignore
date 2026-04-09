@@ -45,5 +45,8 @@ pi/.pi/agent/cache/
 nvim/.config/nvim/lazy-lock.json
 
 # Machine-local config (not synced across machines)
-# Use _local- prefix for extensions, skills, or any config that should stay on one machine
+# Skills and extensions that live in the stow tree but shouldn't sync.
+# Pi requires directory name == frontmatter name, so we ignore by exact path.
 **/_local-*
+pi/.pi/agent/skills/deployment-watcher/
+pi/.pi/agent/skills/incident-io/

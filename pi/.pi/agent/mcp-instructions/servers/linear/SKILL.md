@@ -58,6 +58,9 @@ Key details:
 Use `save_issue` with `team` (team UUID) for new issues. Key fields:
 - `team` (required for creation) — team UUID
 - `title`, `description`, `priority` (1=Urgent, 2=High, 3=Medium, 4=Low)
+- `project` — project name or UUID
+- `projectMilestoneId` — milestone UUID (get milestones via `list_projects` with `includeMilestones=true`)
+- `parentId` — parent issue ID for sub-issues
 - `links` — attach external URLs at creation time
 
 ## Updating Issues

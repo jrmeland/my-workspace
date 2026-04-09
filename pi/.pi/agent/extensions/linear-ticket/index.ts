@@ -24,12 +24,21 @@ interface TicketComment {
 	createdAt: string;
 }
 
+interface ProjectMilestone {
+	id: string;
+	name: string;
+	description: string | null;
+	targetDate: string | null;
+	progress: string | null;
+}
+
 interface TicketData {
 	id: string;
 	title: string;
 	status: string;
 	project: string | null;
 	projectId: string | null;
+	projectMilestone: { id: string; name: string } | null;
 	assignee: string | null;
 	assigneeId: string | null;
 	labels: string[];
@@ -47,6 +56,7 @@ interface TicketData {
 interface TicketState {
 	ticket: TicketData;
 	comments: TicketComment[] | null;
+	projectMilestones: ProjectMilestone[] | null;
 	fetchedAt: number;
 }
 
@@ -58,7 +68,7 @@ export default function linearTicketExtension(pi: ExtensionAPI) {
 
 	async function mcporter(tool: string, args: Record<string, string>): Promise<any> {
 		const argParts = Object.entries(args).map(([k, v]) => `${k}=${v}`);
-		const result = await pi.exec("mcporter", ["call", `linear-server.${tool}`, ...argParts], {
+		const result = await pi.exec("mcporter", ["call", `linear.${tool}`, ...argParts], {
 			timeout: 30_000,
 		});
 		if (result.code !== 0) {
@@ -75,6 +85,7 @@ export default function linearTicketExtension(pi: ExtensionAPI) {
 			status: data.status ?? "Unknown",
 			project: data.project ?? null,
 			projectId: data.projectId ?? null,
+			projectMilestone: data.projectMilestone ?? null,
 			assignee: data.assignee ?? null,
 			assigneeId: data.assigneeId ?? null,
 			labels: (data.labels ?? []).map((l: any) => (typeof l === "string" ? l : l.name)),
@@ -88,6 +99,28 @@ export default function linearTicketExtension(pi: ExtensionAPI) {
 			createdBy: data.createdBy ?? null,
 			gitBranchName: data.gitBranchName ?? null,
 		};
+	}
+
+	async function fetchProjectMilestones(projectName: string): Promise<ProjectMilestone[]> {
+		try {
+			const data = await mcporter("list_projects", {
+				query: projectName,
+				includeMilestones: "true",
+				limit: "3",
+			});
+			const projects = data.projects ?? [];
+			const match = projects.find((p: any) => p.name === projectName) ?? projects[0];
+			if (!match?.milestones) return [];
+			return match.milestones.map((m: any) => ({
+				id: m.id,
+				name: m.name ?? "",
+				description: m.description ?? null,
+				targetDate: m.targetDate ?? null,
+				progress: m.progress ?? null,
+			}));
+		} catch {
+			return [];
+		}
 	}
 
 	async function fetchComments(issueId: string, limit = 10): Promise<TicketComment[]> {
@@ -132,13 +165,15 @@ export default function linearTicketExtension(pi: ExtensionAPI) {
 			`- **Title:** ${t.title}`,
 			`- **Status:** ${t.status}`,
 		];
-		if (t.project) lines.push(`- **Project:** ${t.project}`);
+		if (t.project) lines.push(`- **Project:** ${t.project} (ID: ${t.projectId})`);
+		if (t.projectMilestone) lines.push(`- **Milestone:** ${t.projectMilestone.name} (ID: ${t.projectMilestone.id})`);
 		if (t.assignee) lines.push(`- **Assignee:** ${t.assignee}`);
 		if (t.labels.length) lines.push(`- **Labels:** ${t.labels.join(", ")}`);
 		if (t.priority) lines.push(`- **Priority:** ${t.priority}`);
 		if (t.parentId) lines.push(`- **Parent:** ${t.parentId}`);
 		if (t.dueDate) lines.push(`- **Due:** ${t.dueDate}`);
 		if (t.gitBranchName) lines.push(`- **Branch:** ${t.gitBranchName}`);
+		lines.push(`- **Team:** ${t.team} (ID: ${t.teamId})`);
 		lines.push(`- **URL:** ${t.url}`);
 
 		if (state.comments && state.comments.length > 0) {
@@ -150,6 +185,19 @@ export default function linearTicketExtension(pi: ExtensionAPI) {
 			}
 		}
 
+		// Project milestones
+		if (state.projectMilestones && state.projectMilestones.length > 0) {
+			lines.push("");
+			lines.push(`### Project milestones (${t.project})`);
+			lines.push("| Name | ID | Target Date | Progress |");
+			lines.push("|------|----|-------------|----------|");
+			for (const m of state.projectMilestones) {
+				lines.push(`| ${m.name} | ${m.id} | ${m.targetDate ?? "—"} | ${m.progress ?? "—"} |`);
+			}
+		}
+
+		lines.push("");
+		lines.push("### Ticket interaction rules");
 		lines.push("");
 		lines.push(
 			'When the user refers to "our ticket", "the ticket", "this issue", or similar — they mean ' +
@@ -163,7 +211,24 @@ export default function linearTicketExtension(pi: ExtensionAPI) {
 				t.id +
 				"."
 		);
-		lines.push("Use `mcporter call linear-server.*` via bash to interact with Linear.");
+
+		// Project & team defaults for new tickets
+		lines.push("");
+		lines.push("**When creating any new ticket** (sub-issue, sibling, or related):");
+		lines.push(`- Always use team="${t.team}" (unless the user explicitly specifies a different team).`);
+		if (t.project) {
+			lines.push(`- Always use project="${t.project}" (unless the user explicitly specifies a different project).`);
+		}
+		if (state.projectMilestones && state.projectMilestones.length > 0) {
+			lines.push(
+				"- **Ask the user which milestone to assign** from the table above before creating the ticket. " +
+				'Present them as a numbered list and include a "None" option. ' +
+				"Pass the chosen milestone ID as `projectMilestoneId=<id>` in the save_issue call."
+			);
+		}
+
+		lines.push("");
+		lines.push("Use `mcporter call linear.*` via bash to interact with Linear.");
 		lines.push("");
 
 		return lines.join("\n");
@@ -260,10 +325,14 @@ export default function linearTicketExtension(pi: ExtensionAPI) {
 					`   Priority: ${t.priority ?? "—"} | Labels: ${t.labels.join(", ") || "—"}`,
 					`   URL: ${t.url}`,
 				];
+				if (t.projectMilestone) lines.push(`   Milestone: ${t.projectMilestone.name}`);
 				if (t.parentId) lines.push(`   Parent: ${t.parentId}`);
 				if (t.gitBranchName) lines.push(`   Branch: ${t.gitBranchName}`);
 				if (state.comments) {
 					lines.push(`   Comments loaded: ${state.comments.length}`);
+				}
+				if (state.projectMilestones?.length) {
+					lines.push(`   Project milestones: ${state.projectMilestones.length}`);
 				}
 				ctx.ui.notify(lines.join("\n"), "info");
 				return;
@@ -288,7 +357,10 @@ export default function linearTicketExtension(pi: ExtensionAPI) {
 					const ticket = await fetchTicket(state.ticket.id);
 					const comments =
 						state.comments !== null ? await fetchComments(ticket.id) : null;
-					state = { ticket, comments, fetchedAt: Date.now() };
+					const milestones = ticket.projectId && ticket.project
+						? await fetchProjectMilestones(ticket.project)
+						: state.projectMilestones;
+					state = { ticket, comments, projectMilestones: milestones, fetchedAt: Date.now() };
 					persistState();
 					updateFooter(ctx);
 					ctx.ui.notify(`Refreshed ${ticket.id}: ${ticket.title}`, "success");
@@ -302,12 +374,17 @@ export default function linearTicketExtension(pi: ExtensionAPI) {
 			try {
 				const ticket = await fetchTicket(arg);
 				const comments = withComments ? await fetchComments(ticket.id) : null;
-				state = { ticket, comments, fetchedAt: Date.now() };
+				const milestones = ticket.projectId && ticket.project
+					? await fetchProjectMilestones(ticket.project)
+					: null;
+				state = { ticket, comments, projectMilestones: milestones, fetchedAt: Date.now() };
 				persistState();
 				updateFooter(ctx);
 
 				let msg = `🎫 Active ticket: ${ticket.id} — ${ticket.title}`;
-				if (comments) msg += ` (${comments.length} comments loaded)`;
+				if (ticket.project) msg += ` [${ticket.project}]`;
+				if (milestones?.length) msg += ` (${milestones.length} milestones)`;
+				if (comments) msg += ` (${comments.length} comments)`;
 				ctx.ui.notify(msg, "success");
 			} catch (e: any) {
 				ctx.ui.notify(`Failed to fetch ${arg}: ${e.message}`, "error");
