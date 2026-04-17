@@ -36,7 +36,7 @@ export PATH="$PATH:$HOME/dotnet"
 export PATH="$PATH:$HOME/.dotnet/tools"
 
 # LM Studio CLI
-export PATH="$PATH:$HOME/.cache/lm-studio/bin"
+export PATH="$PATH:$HOME/.lmstudio/bin"
 
 # Load secrets (API keys, tokens, etc.) — never commit this file
 [ -f ~/.secrets ] && source ~/.secrets
