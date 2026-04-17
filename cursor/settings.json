@@ -38,7 +38,7 @@
     "[html]": {
         "editor.suggest.insertMode": "replace"
     },
-    "workbench.colorTheme": "Quiet Light",
+    "workbench.colorTheme": "Default Dark+",
     "cursorpyright.analysis.extraPaths": [
         "/Users/josh/.local/share/virtualenvs/miai-QgsaDsHz/lib",
         "/Users/josh/.vscode/extensions/continue.continue-0.8.1-darwin-arm64"
