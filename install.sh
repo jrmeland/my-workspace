@@ -644,7 +644,7 @@ fi
 if should_run stow; then
 header "Stow configs"
 
-STOW_PACKAGES=(zsh git tmux ghostty sesh tmuxinator nvim claude pi)
+STOW_PACKAGES=(zsh git tmux ghostty sesh tmuxinator nvim claude pi claude-cmux claude-pdf-form-fill claude-pub claude-technical-discovery claude-tmux)
 
 if ! command -v stow &>/dev/null; then
   if $DRY_RUN; then

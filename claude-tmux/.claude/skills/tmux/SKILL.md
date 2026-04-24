@@ -1,0 +1,1 @@
+../../../source/my-workspace/claude/.claude/skills/tmux/SKILL.md
