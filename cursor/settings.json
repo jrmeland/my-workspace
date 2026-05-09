@@ -71,5 +71,6 @@
     "remote.SSH.remotePlatform": {
         "mithril": "linux",
         "shire": "macOS"
-    }
+    },
+    "python.defaultInterpreterPath": "/opt/homebrew/bin/python3"
 }
