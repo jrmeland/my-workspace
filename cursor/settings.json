@@ -72,5 +72,6 @@
         "mithril": "linux",
         "shire": "macOS"
     },
-    "python.defaultInterpreterPath": "/opt/homebrew/bin/python3"
+    "python.defaultInterpreterPath": "/opt/homebrew/bin/python3",
+    "window.autoDetectColorScheme": false
 }
