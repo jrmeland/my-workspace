@@ -1,9 +1,9 @@
 ---
-name: notify
+name: push-notification
 description: Send a push notification to Josh's iPhone via his self-hosted ntfy server. Use whenever the user asks to be notified, alerted, or pinged about something that happens outside the active chat — e.g. "let me know when the build finishes", "notify me when this is done", "ping me when ready", "send me a push", "tell me when X completes". Also use proactively at the end of a long-running task the user started and walked away from, when NTFY_URL/NTFY_TOPIC/NTFY_USER/NTFY_PASSWORD are in the environment. Do NOT use for in-chat status updates the user will see by reading the conversation.
 ---
 
-# notify
+# push-notification
 
 Publishes a notification to the ntfy server at `$NTFY_URL`. Lands on Josh's iPhone (and any other device subscribed to the topic) via APNs through ntfy.sh.
 
@@ -40,28 +40,28 @@ Always invoke the helper rather than hand-rolling curl, so flags, headers, and e
 
 ```bash
 # minimal — body as positional arg
-~/.claude/skills/notify/scripts/notify.sh "build finished"
+~/.claude/skills/push-notification/scripts/push-notification.sh "build finished"
 
 # with title and click-through URL (tap opens it in the browser)
-~/.claude/skills/notify/scripts/notify.sh \
+~/.claude/skills/push-notification/scripts/push-notification.sh \
   -t "Build done" \
   -c "https://github.com/me/repo/actions/runs/123" \
   "all green"
 
 # priority + emoji tags
-~/.claude/skills/notify/scripts/notify.sh \
+~/.claude/skills/push-notification/scripts/push-notification.sh \
   -t "Deploy failed" -p high -T "warning,fire" \
   "rollback needed on api.example.com"
 
 # Markdown body
-~/.claude/skills/notify/scripts/notify.sh -t "Weekly report" -m -c "https://pub.joshmelander.com/x" \
+~/.claude/skills/push-notification/scripts/push-notification.sh -t "Weekly report" -m -c "https://pub.joshmelander.com/x" \
   "**Top movers**: ACME +12%, BETA -4%. [Open report](https://pub.joshmelander.com/x)"
 
 # body from stdin (useful for long messages or piped output)
-make 2>&1 | tail -n 20 | ~/.claude/skills/notify/scripts/notify.sh -t "make output"
+make 2>&1 | tail -n 20 | ~/.claude/skills/push-notification/scripts/push-notification.sh -t "make output"
 
 # override the default topic
-~/.claude/skills/notify/scripts/notify.sh --topic deploys "shipped v1.2.3"
+~/.claude/skills/push-notification/scripts/push-notification.sh --topic deploys "shipped v1.2.3"
 ```
 
 ## Header reference
@@ -85,4 +85,4 @@ make 2>&1 | tail -n 20 | ~/.claude/skills/notify/scripts/notify.sh -t "make outp
 - Topic names are public if guessed — auth is what protects publishing, not the topic name. Don't lean on obscurity.
 - Default `NTFY_TOPIC` of `agents` is configured with a dedicated write-only user. If you publish to a different topic, the user/password may not have access and you'll get a 403.
 - iOS push has a few-second delay on the first message to a given topic (ntfy.sh has to register the device). Steady state is sub-second.
-- Don't add `notify.sh` calls inside tight loops or hooks. Each call is a network round-trip; a flood will be both annoying and likely rate-limited.
+- Don't add `push-notification.sh` calls inside tight loops or hooks. Each call is a network round-trip; a flood will be both annoying and likely rate-limited.

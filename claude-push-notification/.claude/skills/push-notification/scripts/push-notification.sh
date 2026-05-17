@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# notify — send a push notification via Josh's self-hosted ntfy server.
+# push-notification — send a push notification via Josh's self-hosted ntfy server.
 #
 # Reads credentials from the environment. The skill description (SKILL.md)
 # documents what should be set and where.
@@ -8,11 +8,11 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-notify — push notification via ntfy.
+push-notification — push notification via ntfy.
 
 Usage:
-  notify.sh [opts] "message"
-  echo "message" | notify.sh [opts]
+  push-notification.sh [opts] "message"
+  echo "message" | push-notification.sh [opts]
 
 Options:
   -t, --title TITLE        notification title
@@ -31,7 +31,7 @@ Required env:
 EOF
 }
 
-die() { echo "notify: $*" >&2; exit 1; }
+die() { echo "push-notification: $*" >&2; exit 1; }
 
 TITLE=""
 PRIORITY=""
