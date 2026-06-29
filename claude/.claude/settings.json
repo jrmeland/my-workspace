@@ -81,7 +81,7 @@
     "playwright@claude-plugins-official": true
   },
   "effortLevel": "xhigh",
-  "fastMode": true,
+  "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
   "agentPushNotifEnabled": true,
   "voiceEnabled": true,
