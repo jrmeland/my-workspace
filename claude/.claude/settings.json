@@ -85,5 +85,5 @@
   "skipDangerousModePermissionPrompt": true,
   "agentPushNotifEnabled": true,
   "voiceEnabled": true,
-  "tui": "fullscreen"
+  "model": "claude-fable-5[1m]"
 }
