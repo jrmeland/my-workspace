@@ -70,6 +70,19 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --project /Users/josh/source/evals ingest-claude-code --hook",
+            "timeout": 120,
+            "async": true,
+            "statusMessage": "Ingesting session into Phoenix"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
