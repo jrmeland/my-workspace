@@ -16,7 +16,7 @@
     ],
     "defaultMode": "bypassPermissions"
   },
-  "model": "claude-fable-5[1m]",
+  "model": "opus[1m]",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -78,8 +78,8 @@
             "type": "command",
             "command": "uv run --project /Users/josh/source/evals ingest-claude-code --hook",
             "timeout": 120,
-            "async": true,
-            "statusMessage": "Ingesting session into Phoenix"
+            "statusMessage": "Ingesting session into Phoenix",
+            "async": true
           }
         ]
       }
