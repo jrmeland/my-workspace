@@ -16,7 +16,6 @@
     ],
     "defaultMode": "bypassPermissions"
   },
-  "model": "claude-fable-5[1m]",
   "hooks": {
     "UserPromptSubmit": [
       {
