@@ -16,6 +16,7 @@
     ],
     "defaultMode": "bypassPermissions"
   },
+  "model": "claude-fable-5[1m]",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -101,6 +102,5 @@
   },
   "skipDangerousModePermissionPrompt": true,
   "agentPushNotifEnabled": true,
-  "voiceEnabled": true,
-  "model": "claude-fable-5[1m]"
+  "voiceEnabled": true
 }
