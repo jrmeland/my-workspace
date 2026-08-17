@@ -102,5 +102,33 @@
   },
   "skipDangerousModePermissionPrompt": true,
   "agentPushNotifEnabled": true,
-  "voiceEnabled": true
+  "voiceEnabled": true,
+  "autoMode": {
+    "environment": [
+      "### Org-wide",
+      "**Organization**: None configured",
+      "**Cloud provider(s)**: AWS (aws CLI in shell history)",
+      "**Repository visibility**: private (Enclaiva/Sage, confirmed via gh)",
+      "**Internal sharing / snippet hosting**: None configured — treat public paste/gist services as outside the trust boundary",
+      "**Secrets management**: bw (Bitwarden CLI) seen in shell history",
+      "**Default / protected branches**: main (default; protected via ruleset `main rules`, active)",
+      "**CI/CD deploy targets**: None configured",
+      "**Network posture**: None configured",
+      "**Source control**: github.com:Enclaiva/Sage.git (origin), plus configured remotes rivendell (ssh://rivendell/rivendell/Sage) and container-use (local mirror at ~/.config/container-use/repos/github.com/Enclaiva/Sage) — no additional orgs configured",
+      "**Trusted internal domains**: None configured",
+      "**Trusted cloud buckets**: None configured",
+      "**Key internal services**: None configured",
+      "**Internal package registry**: None configured",
+      "**Sensitive data locations & audiences**: .env, .env.example, app/services/report_card/report_card_retention.py, tests/services/report_card/test_report_card_retention.py — any file or store holding personal data, confidential business data, credentials, regulated data, or similarly sensitive material; share only with audiences cleared at the [named+specifics] bar",
+      "**Data retention / declassification**: None configured",
+      "**Sensitive remote targets**: any namespace, host, or container whose name carries `prod` or `production` as a whole word or name segment",
+      "**Protected deployment namespaces / environments**: None configured — fall back to the Sensitive remote targets heuristic",
+      "**Protected IaC scopes**: IAM, RBAC, networking, quota, and node-pool resources; anything whose name or tag carries `prod` or `production` as a whole word or name segment",
+      "### User-specific",
+      "**Primary use of Claude Code**: software development (FastAPI backend, app-service within Sage monorepo)",
+      "**Trusted repo**: /Users/josh/source/Sage/apps/app-service and its remotes (origin github.com:Enclaiva/Sage.git, private; rivendell ssh://rivendell/rivendell/Sage; container-use local mirror) — private repo, confidential material OK to commit/push there, but secrets/credentials are never cleared in by visibility alone",
+      "**Org-specific CLIs**: None configured",
+      "routine actions under this repo's working tree (/Users/josh/source/Sage/apps/app-service) are the trusted scope for local dev commands (make dev, make test, make lint, poetry)"
+    ]
+  }
 }
