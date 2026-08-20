@@ -1,1 +1,2 @@
 shell-integration-features = ssh-terminfo,ssh-env
+copy-on-select = clipboard
