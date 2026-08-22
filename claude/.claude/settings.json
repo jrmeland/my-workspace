@@ -16,7 +16,7 @@
     ],
     "defaultMode": "auto"
   },
-  "model": "opus[1m]",
+  "model": "claude-fable-5[1m]",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -102,7 +102,6 @@
   },
   "skipDangerousModePermissionPrompt": true,
   "agentPushNotifEnabled": true,
-  "voiceEnabled": true,
   "autoMode": {
     "environment": [
       "### Org-wide",
@@ -130,5 +129,6 @@
       "**Org-specific CLIs**: None configured",
       "routine actions under this repo's working tree (/Users/josh/source/Sage/apps/app-service) are the trusted scope for local dev commands (make dev, make test, make lint, poetry)"
     ]
-  }
+  },
+  "voiceEnabled": true
 }
