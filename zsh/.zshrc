@@ -174,3 +174,8 @@ if [[ -f "$HOME/.workspace-sync-conflict" ]]; then
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   printf '\033[0m'
 fi
+
+# --- Sage release workflow (added 2026-09-07) ---
+export TOUCHSTONE_DIR="$HOME/source/touchstone"
+# LINEAR_ACCESS_KEY lives outside this repo; ~/.config/sage/release.env is chmod 600.
+[ -f "$HOME/.config/sage/release.env" ] && source "$HOME/.config/sage/release.env"
