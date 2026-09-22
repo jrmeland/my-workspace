@@ -26,6 +26,15 @@
             "command": "[ -n \"$SUPERSET_HOME_DIR\" ] && [ -x \"$SUPERSET_HOME_DIR/hooks/notify.sh\" ] && \"$SUPERSET_HOME_DIR/hooks/notify.sh\" || true"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/Users/josh/.claude/helpers/graft-hooks.cjs\" prompt",
+            "timeout": 15000
+          }
+        ]
       }
     ],
     "Stop": [
@@ -34,6 +43,15 @@
           {
             "type": "command",
             "command": "[ -n \"$SUPERSET_HOME_DIR\" ] && [ -x \"$SUPERSET_HOME_DIR/hooks/notify.sh\" ] && \"$SUPERSET_HOME_DIR/hooks/notify.sh\" || true"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/Users/josh/.claude/helpers/graft-hooks.cjs\" stop",
+            "timeout": 8000
           }
         ]
       }
@@ -45,6 +63,26 @@
           {
             "type": "command",
             "command": "[ -n \"$SUPERSET_HOME_DIR\" ] && [ -x \"$SUPERSET_HOME_DIR/hooks/notify.sh\" ] && \"$SUPERSET_HOME_DIR/hooks/notify.sh\" || true"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/Users/josh/.claude/helpers/graft-hooks.cjs\" post-edit",
+            "timeout": 10000
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|mcp__graft__|Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/Users/josh/.claude/helpers/graft-hooks.cjs\" tool-savings",
+            "timeout": 8000
           }
         ]
       }
@@ -80,6 +118,17 @@
             "timeout": 120,
             "statusMessage": "Ingesting session into Phoenix",
             "async": true
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/Users/josh/.claude/helpers/graft-hooks.cjs\" session-start",
+            "timeout": 8000
           }
         ]
       }
