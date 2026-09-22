@@ -141,7 +141,16 @@
   "enabledPlugins": {
     "pr-review-toolkit@claude-plugins-official": true,
     "slack@claude-plugins-official": true,
-    "playwright@claude-plugins-official": true
+    "playwright@claude-plugins-official": true,
+    "chisle@chisle": true
+  },
+  "extraKnownMarketplaces": {
+    "chisle": {
+      "source": {
+        "source": "github",
+        "repo": "JayPokale/Chisle"
+      }
+    }
   },
   "effortLevel": "xhigh",
   "modelSettings": {
