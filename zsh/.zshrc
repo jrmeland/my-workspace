@@ -179,3 +179,6 @@ fi
 export TOUCHSTONE_DIR="$HOME/source/touchstone"
 # LINEAR_ACCESS_KEY lives outside this repo; ~/.config/sage/release.env is chmod 600.
 [ -f "$HOME/.config/sage/release.env" ] && source "$HOME/.config/sage/release.env"
+
+# Added by Antigravity IDE
+export PATH="/Users/josh/.antigravity-ide/antigravity-ide/bin:$PATH"
