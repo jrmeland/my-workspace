@@ -131,6 +131,16 @@
             "timeout": 8000
           }
         ]
+      },
+      {
+        "matcher": "^(startup|resume|clear|compact|fork)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/Users/josh/.claude/hooks/herdr-agent-state.sh' session",
+            "timeout": 10
+          }
+        ]
       }
     ]
   },
