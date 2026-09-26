@@ -16,7 +16,7 @@
     ],
     "defaultMode": "auto"
   },
-  "model": "claude-fable-5-1",
+  "model": "opus",
   "hooks": {
     "UserPromptSubmit": [
       {
