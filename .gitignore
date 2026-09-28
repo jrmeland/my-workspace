@@ -50,3 +50,6 @@ nvim/.config/nvim/lazy-lock.json
 **/_local-*
 pi/.pi/agent/skills/deployment-watcher/
 pi/.pi/agent/skills/incident-io/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

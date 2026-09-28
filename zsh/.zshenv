@@ -38,5 +38,8 @@ export PATH="$PATH:$HOME/.dotnet/tools"
 # LM Studio CLI
 export PATH="$PATH:$HOME/.lmstudio/bin"
 
+# Opt out of CLI telemetry (graft and others honoring the convention)
+export DO_NOT_TRACK=1
+
 # Load secrets (API keys, tokens, etc.) — never commit this file
 [ -f ~/.secrets ] && source ~/.secrets

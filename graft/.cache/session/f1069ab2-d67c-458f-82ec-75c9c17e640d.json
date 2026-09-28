@@ -1,12 +1,16 @@
 {
-  "lastQuery": null,
+  "lastQuery": "sure please add that",
   "perAgentQuery": {},
-  "graftReads": 0,
+  "graftReads": 3,
   "sourceReads": 0,
   "savedTokens": 0,
   "injectedPointers": [],
   "nudges": 0,
-  "inputCostMicros": 285755,
-  "inputTokensBilled": 505889,
-  "lastBillingUuid": "0ecbdcd7-18db-4d4f-a1f2-d20188edcb2d"
+  "inputCostMicros": 584543,
+  "inputTokensBilled": 1050530,
+  "lastBillingUuid": "c9c078b5-c328-49e8-999a-475466161c2c",
+  "turnUsedGraft": false,
+  "host": "claude-code",
+  "graftTurns": 1,
+  "lastTallyUuid": "39b31845-6f2b-4346-903f-3ccf4f95ec0c"
 }
