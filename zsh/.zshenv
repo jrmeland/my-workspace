@@ -43,3 +43,4 @@ export DO_NOT_TRACK=1
 
 # Load secrets (API keys, tokens, etc.) — never commit this file
 [ -f ~/.secrets ] && source ~/.secrets
+. "$HOME/.cargo/env"
