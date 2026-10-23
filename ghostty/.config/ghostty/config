@@ -1,2 +1,3 @@
 shell-integration-features = ssh-terminfo,ssh-env
 copy-on-select = clipboard
+theme = dark:Gruvbox Dark,light:Gruvbox Light
